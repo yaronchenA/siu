@@ -75,6 +75,7 @@ Rules:
 - `make test` — builds and runs the host unit tests (`tests/`) with the Mac's C compiler.
 - `tools/cpm_emulator.py` — drives the SIU over a USB-UART adapter using the real protocol; later reused as the production test fixture driver.
 - `tools/test_siu_proto.py` — checks the Python codec against the same spec bytes as the C tests (run by `make test`).
+- `make hil` — pytest suite in `tests/hil/` that checks the real firmware against the protocol spec over the USB-serial adapter.
 
 ## 7. Directory layout
 

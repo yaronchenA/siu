@@ -3,6 +3,7 @@
 #   make          build firmware (build/siu.elf, build/siu.bin)
 #   make flash    program the board over its ST-LINK/V2
 #   make test     build and run the host unit tests
+#   make hil      hardware-in-the-loop protocol tests against a connected SIU (PORT=...)
 #   make clean
 
 TARGET   := siu
@@ -56,7 +57,7 @@ OBJS := $(C_SRCS:%.c=$(BUILD)/%.o) $(ASM_SRCS:%.s=$(BUILD)/%.o)
 # (ST-LINK/V2-1, 374b/3752) can stay plugged in too.
 STLINK_VID_PID := 0x0483 0x3748
 
-.PHONY: all clean flash test
+.PHONY: all clean flash test hil
 
 all: $(BUILD)/$(TARGET).elf $(BUILD)/$(TARGET).bin
 	$(SIZE) $(BUILD)/$(TARGET).elf
@@ -101,6 +102,13 @@ test: $(TESTS:%=$(BUILD)/host/%)
 	@for t in $^; do echo "== $$t"; $$t || exit 1; done
 	@if [ -x .venv/bin/python ]; then echo "== tools/test_siu_proto.py"; .venv/bin/python tools/test_siu_proto.py; \
 	 else echo "(skipping Python tests: create .venv, see README)"; fi
+
+# ---- hardware-in-the-loop tests ------------------------------------------------------
+
+PORT ?= /dev/cu.usbserial-0001
+
+hil:
+	.venv/bin/python -m pytest tests/hil -v -p no:cacheprovider --port $(PORT)
 
 clean:
 	rm -rf $(BUILD)

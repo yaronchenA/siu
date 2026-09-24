@@ -33,36 +33,7 @@ import time
 import serial
 
 import siu_proto as p
-
-DEFAULT_PORT = "/dev/cu.usbserial-0001"
-
-
-class Link:
-    def __init__(self, port: str, baud: int):
-        self.ser = serial.Serial(port, baud, timeout=0.001)
-        self.buf = bytearray()
-
-    def send(self, frame: p.Frame) -> None:
-        self.ser.write(p.encode_wire(frame))
-
-    def recv(self, deadline: float) -> p.Frame | None:
-        """Next valid frame before the deadline, or None."""
-        while time.monotonic() < deadline:
-            self.buf += self.ser.read(256)
-            while b"\x00" in self.buf:
-                wire, _, rest = self.buf.partition(b"\x00")
-                self.buf = bytearray(rest)
-                if not wire:
-                    continue
-                try:
-                    return p.decode_raw(p.cobs_decode(bytes(wire)))
-                except ValueError:
-                    stats["bad_frames"] += 1
-        return None
-
-    def flush(self) -> None:
-        self.ser.reset_input_buffer()
-        self.buf.clear()
+from siu_link import DEFAULT_PORT, Link
 
 
 stats = {"polls": 0, "retries": 0, "lost": 0, "bad_frames": 0, "errors": 0, "handshakes": 0, "rtt_sum": 0.0}
@@ -298,6 +269,7 @@ def main() -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        stats["bad_frames"] = link.bad_frames
         print_stats()
         link.ser.close()
     return 0

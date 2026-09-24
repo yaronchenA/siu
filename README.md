@@ -65,11 +65,22 @@ It performs the HELLO → SESSION_START handshake, prints the SIU's identity, th
 
 After reset the LED runs its self-test (red → green → blue), then blinks red slowly (no link) until the emulator connects.
 
+## Hardware-in-the-loop tests
+
+`make hil` runs an automated pytest suite against the real SIU over the USB-serial adapter — 48 checks of the protocol spec: handshake and identity, session rules, every receive rule (bad CRC, wrong version, malformed TLV, oversize, wrong session, wrong direction), resync after line noise, duplicate SEQ and REQ_ID handling, link timeout and session end, error codes, `CP_SET` duty limits, LED commands, config, and 250 polls at 20 ms with no loss. Takes ~10 s.
+
+```sh
+make hil                               # default port /dev/cu.usbserial-0001
+make hil PORT=/dev/cu.usbserial-XXXX
+```
+
+Tests are skipped if the port isn't there. Flash the current firmware first (`make flash`).
+
 ## Layout
 
 ```
 app/          pure logic (host-testable)       board/     board support (pins, clocks)
 drivers/      hardware drivers                 common/    shared types
-src/main.c    init + main loop                 tests/     host unit tests
+src/main.c    init + main loop                 tests/     host unit tests (C) + hil/ (pytest, real hardware)
 ld/           linker script                    third_party/st/   ST CMSIS + LL (vendored)
 ```
