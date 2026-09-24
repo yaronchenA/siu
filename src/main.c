@@ -16,13 +16,14 @@
 #include "rgb_led.h"
 #include "rs485.h"
 #include "siu_config.h"
+#include "siu_log.h"
 
 #ifndef BUILD_ID
 #define BUILD_ID 0u   /* set by the Makefile to the short git hash */
 #endif
 
 #define FW_MAJOR 0u
-#define FW_MINOR 3u
+#define FW_MINOR 4u
 #define FW_PATCH 0u
 
 #define LED_UPDATE_MS 10u
@@ -54,10 +55,17 @@ static void identity_init(void)
     s_id.bootloader_ver = 0;               /* no bootloader yet */
 }
 
+static const siu_log_lock_t k_log_lock = { board_critical_enter, board_critical_exit };
+
+static const char *const k_reset_name[] = { "power-on", "brown-out", "watchdog", "software", "fw-update", "pin" };
+
 int main(void)
 {
     board_init();
+    siu_log_init(&k_log_lock);
     identity_init();
+    siu_log("boot: SIU fw %u.%u.%u build %08x, reset: %s", FW_MAJOR, FW_MINOR, FW_PATCH,
+            (uint32_t)BUILD_ID, k_reset_name[s_id.reset_reason]);
 
     uint32_t now = board_millis();
     siu_config_init();
@@ -72,13 +80,15 @@ int main(void)
 
     uint32_t last_led_ms = 0;
     for (;;) {
-        now = board_millis();
-        link_task_tick(now);
+        link_task_tick();
 
+        now = board_millis();
         if ((now - last_led_ms) >= LED_UPDATE_MS) {
             last_led_ms = now;
-            uint32_t cs = board_critical_enter();   /* LED_SET arrives in the link task */
-            rgb_t c = led_ctrl_update(now);
+            /* LED_SET / AUTH_FEEDBACK arrive in the link task: read the clock inside the critical
+             * section so it's never older than a feedback start time the link task recorded. */
+            uint32_t cs = board_critical_enter();
+            rgb_t c = led_ctrl_update(board_millis());
             uint8_t brightness = siu_config_led_brightness();
             board_critical_exit(cs);
             rgb_led_set_brightness(brightness);

@@ -255,3 +255,94 @@ def describe_errors(f: Frame) -> list[str]:
         ref, code = v[0], v[1]
         out.append(f"ERROR {ERROR_NAMES.get(code, code)} for {TLV_NAMES.get(ref, f'0x{ref:02X}')}")
     return out
+
+
+# ---- human-readable decoding (for --trace and tests) ----------------------------------------
+
+CFG_LOG_ENABLE = 0x10
+CFG_KEY_NAMES = {CFG_LED_BRIGHTNESS: "LED brightness", CFG_LOG_ENABLE: "log enable"}
+CP_MODE_NAMES = {CP_MODE_CONST_12V: "CONST_12V", CP_MODE_PWM: "PWM", CP_MODE_STATE_F: "STATE_F"}
+PATTERN_NAMES = {0: "default", 1: "solid", 2: "blink", 3: "flicker", 4: "breathe"}
+AUTH_NAMES = {v: k for k, v in AUTH_RESULTS.items()}
+FLAG_NAMES = [(FLAG_RSP, "RSP"), (FLAG_RETRY, "RETRY"), (FLAG_EVT_PENDING, "EVT_PENDING"), (FLAG_SERVICE, "SERVICE")]
+
+
+def tlv_name(t: int) -> str:
+    return TLV_NAMES.get(t, f"UNKNOWN_0x{t:02X}")
+
+
+def describe_tlv(t: int, v: bytes) -> str:
+    """One-line meaning of a TLV value; falls back to '' if it can't be decoded."""
+    try:
+        if t == HELLO:
+            return f"CPM protocol {v[0]}.{v[1]}, CPM UID {v[2:14].hex().upper()}"
+        if t == HELLO_INFO:
+            major, minor, boot, reset, caps, life = struct.unpack_from("<BBIBIB", v)
+            return (f"protocol {major}.{minor}, boot_id 0x{boot:08X}, reset {RESET_REASONS.get(reset, reset)}, "
+                    f"caps 0x{caps:08X}, {'production' if life else 'FACTORY'}")
+        if t == SESSION_START:
+            sid, poll, tmo = struct.unpack_from("<BHH", v)
+            return f"session 0x{sid:02X}, poll {poll} ms, SIU link timeout {tmo} ms"
+        if t == SESSION_ACK:
+            return f"session 0x{v[0]:02X}"
+        if t == EVENT_ACK:
+            return f"events acknowledged up to #{struct.unpack_from('<H', v)[0]}"
+        if t == ERROR:
+            return f"{ERROR_NAMES.get(v[1], v[1])} for {tlv_name(v[0])}" + (f" (req {v[2]})" if v[2] else "")
+        if t == RESULT:
+            return f"req {v[0]} {tlv_name(v[1])}: {RESULT_NAMES.get(v[2], v[2])}, detail {v[3]}"
+        if t == SESSION_END:
+            return f"reason {v[0]}"
+        if t == SIU_UID:
+            return v.hex().upper()
+        if t == SERIAL_NUMBER:
+            return repr(v.decode(errors="replace"))
+        if t == HW_INFO:
+            model, rev, rating, phases, ctype = struct.unpack_from("<HBBBB", v)
+            return f"model 0x{model:04X} rev {rev}, {rating} A, {phases}-phase, {'socket' if ctype == 0 else 'tethered'}"
+        if t == FW_INFO:
+            ma, mi, pa, build, boot = struct.unpack_from("<BBBIB", v)
+            return f"firmware {ma}.{mi}.{pa} build {build:08x}, bootloader {boot}"
+        if t == CP_SET:
+            mode, duty = struct.unpack_from("<BH", v)
+            return CP_MODE_NAMES.get(mode, str(mode)) + (f" {duty / 10:.1f} %" if mode == CP_MODE_PWM else "")
+        if t == LED_SET:
+            state = UI_STATES[v[0]] if v[0] < len(UI_STATES) else f"state {v[0]}"
+            return f"{state}, pattern {PATTERN_NAMES.get(v[1], v[1])}"
+        if t == LED_RAW:
+            return f"R {v[0]} G {v[1]} B {v[2]}"
+        if t == AUTH_FEEDBACK:
+            return f"req {v[0]}, {AUTH_NAMES.get(v[1], f'result {v[1]}')}"
+        if t == CONFIG_SET:
+            return f"req {v[0]}, {CFG_KEY_NAMES.get(v[1], f'key 0x{v[1]:02X}')} = {v[2:].hex()}"
+        if t in (CONFIG_GET, CONFIG_VALUE):
+            val = f" = {v[1:].hex()}" if t == CONFIG_VALUE else ""
+            return f"{CFG_KEY_NAMES.get(v[0], f'key 0x{v[0]:02X}')}{val}"
+        if t == STATUS_FAST:
+            return str(StatusFast.parse(v))
+        if t == LOG_TEXT:
+            return " | ".join(v.decode(errors="replace").splitlines())
+    except (IndexError, struct.error):
+        return "(too short to decode)"
+    return ""
+
+
+def format_frame(direction: str, f: Frame) -> str:
+    """Multi-line dump: header, then every TLV with its raw bytes and meaning."""
+    flags = " ".join(n for bit, n in FLAG_NAMES if f.flags & bit) or "-"
+    raw = encode_raw(f)
+    lines = [f"{direction} seq {f.seq:3d} session 0x{f.session:02X} flags {flags:<11} "
+             f"({len(raw)} bytes raw, {len(encode_wire(f))} on the wire)"]
+    for t, v in f.tlvs:
+        meaning = describe_tlv(t, v)
+        hexv = v.hex(" ").upper() if len(v) <= 16 else v[:16].hex(" ").upper() + " ..."
+        lines.append(f"      0x{t:02X} {tlv_name(t):<14} len {len(v):3d}: {hexv:<50} {meaning}")
+    return "\n".join(lines)
+
+
+def log_lines(f: Frame) -> list[str]:
+    """Debug text lines the SIU sent in LOG_TEXT TLVs."""
+    out = []
+    for v in f.find_all(LOG_TEXT):
+        out += v.decode(errors="replace").splitlines()
+    return out

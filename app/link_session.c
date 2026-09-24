@@ -7,6 +7,8 @@
 #include "frame.h"
 #include "led_ctrl.h"
 #include "proto.h"
+#include "siu_config.h"
+#include "siu_log.h"
 
 #define SERIAL_MAX_LEN      24u
 #define POLL_MIN_MS         5u
@@ -31,8 +33,13 @@ static struct {
     link_stats_t stats;
 } s;
 
+static const char *const k_state_name[] = { "UNLINKED", "HANDSHAKE", "ACTIVE" };
+
 static void enter(link_state_t st)
 {
+    if (st != s.state || st != LINK_ACTIVE) {
+        siu_log("link: %s", k_state_name[st]);
+    }
     s.state = st;
     s.cache_valid = false;
     /* UNLINKED and HANDSHAKE hold the safe state (§4.1): CP to state F, "no link" LED. */
@@ -60,8 +67,10 @@ const link_stats_t *link_session_stats(void) { return &s.stats; }
 
 void link_session_tick(uint32_t now_ms)
 {
-    if (s.state != LINK_UNLINKED && (now_ms - s.last_rx_ms) > s.timeout_ms) {
+    /* Signed difference: a "now" slightly older than last_rx_ms must read as "not expired". */
+    if (s.state != LINK_UNLINKED && (int32_t)(now_ms - s.last_rx_ms) > (int32_t)s.timeout_ms) {
         s.stats.link_losses++;
+        siu_log("link: timeout, no valid request for %u ms", now_ms - s.last_rx_ms);
         enter(LINK_UNLINKED);
     }
 }
@@ -70,6 +79,7 @@ void link_session_tick(uint32_t now_ms)
 
 static void put_error(frame_builder_t *b, uint8_t ref_type, uint8_t code)
 {
+    siu_log("err: TLV 0x%02x -> error %u", ref_type, code);
     const uint8_t v[TLV_LEN_ERROR] = { ref_type, code, 0 };
     (void)tlv_put(b, TLV_ERROR, v, sizeof v);
 }
@@ -170,8 +180,10 @@ size_t link_session_handle(const uint8_t *raw, size_t len, const siu_status_t *s
     size_t plen;
     const uint8_t *v;
 
-    if (frame_parse(raw, len, &hdr, &payload, &plen) != FRAME_OK) {
+    frame_status_t fs = frame_parse(raw, len, &hdr, &payload, &plen);
+    if (fs != FRAME_OK) {
         s.stats.bad_frames++;
+        siu_log("rx: dropped frame (len %u, reason %u)", (uint32_t)len, fs);
         return 0;
     }
     if (hdr.flags & PROTO_FLAG_RSP) {
@@ -187,6 +199,7 @@ size_t link_session_handle(const uint8_t *raw, size_t len, const siu_status_t *s
         }
         s.stats.rx_frames++;
         s.last_rx_ms = now_ms;
+        siu_log("link: HELLO, CPM protocol %u.%u", v[0], v[1]);
         enter(LINK_HANDSHAKE);
         return answer_hello(&hdr, out, cap);
     }
@@ -202,6 +215,7 @@ size_t link_session_handle(const uint8_t *raw, size_t len, const siu_status_t *s
         s.poll_period_ms = get_u16le(&v[1]);
         s.timeout_ms = get_u16le(&v[3]);
         enter(LINK_ACTIVE);
+        siu_log("link: session 0x%02x, poll %u ms, timeout %u ms", s.session, s.poll_period_ms, s.timeout_ms);
     } else if (s.state != LINK_ACTIVE || hdr.session != s.session) {
         s.stats.stale_session++;
         return 0;
@@ -241,6 +255,7 @@ size_t link_session_handle(const uint8_t *raw, size_t len, const siu_status_t *s
             }
             break;
         case TLV_SESSION_END:
+            siu_log("link: SESSION_END");
             end_session = true;
             break;
         case TLV_EVENT_ACK:
@@ -265,6 +280,22 @@ size_t link_session_handle(const uint8_t *raw, size_t len, const siu_status_t *s
     if (end_session) {
         enter(LINK_UNLINKED);
         return 0;
+    }
+
+    /* Debug log lines ride along, but never push the response past PROTO_LOG_RESPONSE_MAX bytes
+     * (the CPM's 10 ms response timeout, §6.1); what doesn't fit goes out with later polls. */
+    if (siu_config_log_enabled() && siu_log_pending()) {
+        size_t used = b.len + 2u + PROTO_CRC_LEN;           /* + LOG_TEXT's own TLV header */
+        if (used < PROTO_LOG_RESPONSE_MAX) {
+            char text[TLV_LOG_TEXT_MAX];
+            size_t max = PROTO_LOG_RESPONSE_MAX - used;
+            max = max < frame_space(&b) - 2u ? max : frame_space(&b) - 2u;
+            max = max < sizeof text ? max : sizeof text;
+            size_t n = siu_log_drain(text, max);
+            if (n > 0u) {
+                (void)tlv_put(&b, TLV_LOG_TEXT, text, (uint8_t)n);
+            }
+        }
     }
 
     size_t n = frame_finish(&b);

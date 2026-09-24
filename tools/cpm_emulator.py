@@ -5,7 +5,10 @@ through a 3.3 V USB-serial adapter on the SIU's link UART.
 Does what a CPM does: HELLO -> SESSION_START handshake, then polls every 20 ms with CP_SET
 and LED_SET, retries lost requests, detects link loss and re-handshakes.
 
-    .venv/bin/python tools/cpm_emulator.py [--port /dev/cu.usbserial-0001]
+    .venv/bin/python tools/cpm_emulator.py [--port /dev/cu.usbserial-0001] [--trace] [--no-log]
+
+The SIU's debug log (LOG_TEXT) is switched on after every handshake and printed as "SIU log>".
+--trace prints every frame on the wire, TLV by TLV (50 frames a second — best with a short --duration).
 
 Commands while running (type + Enter):
     led <state> [pattern]   state by name or number, e.g. "led charging", "led 3"; pattern 0-4
@@ -18,6 +21,8 @@ Commands while running (type + Enter):
     bad                     send an unknown TLV (expect an ERROR back)
     dup                     send the next poll twice with the same SEQ (tests the SIU's duplicate cache)
     stop / go               pause / resume polling (stop > 200 ms: the SIU should show "no link")
+    trace on / trace off    start / stop printing every frame
+    log on / log off        switch the SIU's LOG_TEXT on / off
     stats                   print link statistics
     quit
 """
@@ -100,6 +105,8 @@ class Emulator:
             return False
         self.session = self.last_session = session
         self.led_sent_at = 0.0                  # full state push on the first poll (§4.2)
+        if not self.args.no_log:
+            self.extra.append(p.config_set(self.next_req_id(), p.CFG_LOG_ENABLE, b"\x01"))
         print(f"-- session 0x{session:02X} active (poll {self.args.poll_ms} ms, "
               f"SIU link timeout {self.args.siu_timeout_ms} ms)")
         return True
@@ -130,7 +137,8 @@ class Emulator:
             stats["errors"] += 1
             print(f"   SIU> {e}")
         for r in p.describe_results(rsp):
-            print(f"   SIU> {r}")
+            if not self.link.trace:
+                print(f"   SIU> {r}")
         if (v := rsp.find(p.STATUS_FAST)) is not None:
             s = str(p.StatusFast.parse(v))
             if s != self.last_status:
@@ -187,6 +195,11 @@ class Emulator:
             elif cmd == "go":
                 self.paused = False
                 print("-- polling resumed")
+            elif cmd == "trace":
+                self.link.trace = words[1].lower() == "on"
+            elif cmd == "log":
+                self.extra.append(p.config_set(self.next_req_id(), p.CFG_LOG_ENABLE,
+                                               b"\x01" if words[1].lower() == "on" else b"\x00"))
             elif cmd == "stats":
                 print_stats()
             else:
@@ -222,6 +235,8 @@ def main() -> int:
                     help="no valid response for this long = link lost (spec: 100 ms)")
     ap.add_argument("--duration", type=float, default=0, help="run this many seconds, then exit (0 = until quit)")
     ap.add_argument("--commands", default="", help="';'-separated commands run at start, e.g. 'led charging'")
+    ap.add_argument("--trace", action="store_true", help="print every frame, TLV by TLV")
+    ap.add_argument("--no-log", action="store_true", help="don't switch on the SIU's debug log")
     args = ap.parse_args()
 
     try:
@@ -230,6 +245,8 @@ def main() -> int:
         print(f"Can't open {args.port}: {e}", file=sys.stderr)
         return 1
 
+    link.trace = args.trace
+    link.on_log = lambda line: print(f"   SIU log> {line}")
     emu = Emulator(link, args)
     q: queue.Queue = queue.Queue()
     if args.duration == 0:

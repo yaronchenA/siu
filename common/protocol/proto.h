@@ -109,6 +109,10 @@ enum {
 #define TLV_LEN_RESULT           4u
 #define TLV_LEN_CONFIG_GET       1u
 #define TLV_LEN_CONFIG_SET_MIN   3u      /* req_id, key, >= 1 value byte */
+#define TLV_LOG_TEXT_MAX       120u      /* §8.8 */
+/* A response carrying LOG_TEXT stays within this many raw bytes, so it's on the wire in ~8 ms at
+ * 115200 baud — inside the CPM's 10 ms response timeout (§6.1). */
+#define PROTO_LOG_RESPONSE_MAX  90u
 #define TLV_LEN_STATUS_FAST     13u
 
 /* ERROR.code (§8.10) */

@@ -29,10 +29,10 @@ void link_task_set_status(const siu_status_t *status)
     board_critical_exit(cs);
 }
 
-void link_task_tick(uint32_t now_ms)
+void link_task_tick(void)
 {
     uint32_t cs = board_critical_enter();
-    link_session_tick(now_ms);
+    link_session_tick(board_millis());
     board_critical_exit(cs);
 }
 

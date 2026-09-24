@@ -11,6 +11,7 @@
 /* CONFIG keys (§8.7) */
 enum {
     CFG_KEY_LED_BRIGHTNESS = 0x01,   /* u8, 0..100 % */
+    CFG_KEY_LOG_ENABLE     = 0x10,   /* u8, 0 = off (default), 1 = LOG_TEXT in responses */
 };
 
 void siu_config_init(void);
@@ -22,5 +23,6 @@ bool siu_config_set(uint8_t key, const uint8_t *val, uint8_t len);
 uint8_t siu_config_get(uint8_t key, uint8_t *out, uint8_t cap);
 
 uint8_t siu_config_led_brightness(void);
+bool siu_config_log_enabled(void);
 
 #endif /* SIU_CONFIG_H */

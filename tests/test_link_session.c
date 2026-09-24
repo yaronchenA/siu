@@ -7,6 +7,7 @@
 #include "link_session.h"
 #include "proto.h"
 #include "siu_config.h"
+#include "siu_log.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -451,6 +452,82 @@ static void test_config_brightness(void)
     CHECK(siu_config_led_brightness() == 40);
 }
 
+static void test_log_text_bounded_and_drained_over_polls(void)
+{
+    siu_log_init(NULL);
+    bring_up();
+    req_t q;
+    const uint8_t enable[] = { 9, CFG_KEY_LOG_ENABLE, 1 };
+    req_begin(&q, 0, 3, 7);
+    req_put(&q, TLV_CONFIG_SET, enable, sizeof enable);
+    req_send(&q, 1030);
+
+    for (int i = 0; i < 12; i++) {
+        siu_log("test line %02d with some padding text", i);   /* ~36 bytes each */
+    }
+    char all[1024];
+    size_t total = 0;
+    for (uint8_t seq = 4; seq < 40 && total < sizeof all; seq++) {
+        req_begin(&q, 0, seq, 7);
+        req_send(&q, 1030 + seq);
+        CHECK(g_rsp_len <= PROTO_LOG_RESPONSE_MAX);          /* never longer than the budget */
+        uint8_t len;
+        const uint8_t *v = rsp_tlv(TLV_LOG_TEXT, &len);
+        if (v) {
+            CHECK(v[len - 1] == '\n');                        /* whole lines only */
+            memcpy(&all[total], v, len);
+            total += len;
+        }
+    }
+    all[total] = '\0';
+    CHECK(strstr(all, "config: key 0x10 = 1 ok") != NULL);    /* the SIU's own log, in order */
+    CHECK(strstr(all, "test line 00 ") != NULL);              /* oldest kept ... */
+    CHECK(siu_log_dropped() > 0);                             /* ... 12 lines overflowed the 320-byte buffer */
+    CHECK(strstr(all, "test line 11 ") == NULL);              /* newest dropped, not old ones overwritten */
+
+    siu_log("after the burst");                               /* the drop note arrives before new lines */
+    total = 0;
+    for (uint8_t seq = 40; seq < 45; seq++) {
+        req_begin(&q, 0, seq, 7);
+        req_send(&q, 1100 + seq);
+        uint8_t len;
+        const uint8_t *v = rsp_tlv(TLV_LOG_TEXT, &len);
+        if (v) {
+            memcpy(&all[total], v, len);
+            total += len;
+        }
+    }
+    all[total] = '\0';
+    const char *note = strstr(all, "lines dropped]");
+    const char *after = strstr(all, "after the burst");
+    CHECK(note != NULL && after != NULL && note < after);
+}
+
+static void test_log_text_off_by_default(void)
+{
+    siu_log_init(NULL);
+    bring_up();
+    siu_log("should stay in the buffer");
+    req_t q;
+    req_begin(&q, 0, 3, 7);
+    req_send(&q, 1030);
+    CHECK(rsp_tlv(TLV_LOG_TEXT, NULL) == NULL);
+}
+
+static void test_stale_now_is_not_a_timeout(void)
+{
+    /* Regression: the main loop's clock reading can be 1 ms older than the frame time the link
+     * task just stored. That must not look like a 4-billion-ms silence. */
+    bring_up();
+    req_t q;
+    req_begin(&q, 0, 3, 7);
+    req_send(&q, 5000);                    /* frame recorded at t=5000 */
+    link_session_tick(4999);               /* main loop read the clock just before */
+    CHECK(link_session_state() == LINK_ACTIVE);
+    link_session_tick(5000 + 201);
+    CHECK(link_session_state() == LINK_UNLINKED);
+}
+
 int main(void)
 {
     struct { const char *name; void (*fn)(void); } tests[] = {
@@ -468,6 +545,9 @@ int main(void)
         { "led_raw_needs_service_flag",               test_led_raw_needs_service_flag },
         { "auth_feedback_result_and_duplicate_req_id", test_auth_feedback_result_and_duplicate_req_id },
         { "config_brightness",                        test_config_brightness },
+        { "log_text_bounded_and_drained_over_polls",  test_log_text_bounded_and_drained_over_polls },
+        { "log_text_off_by_default",                  test_log_text_off_by_default },
+        { "stale_now_is_not_a_timeout",               test_stale_now_is_not_a_timeout },
     };
     for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++) {
         int before = g_failures;

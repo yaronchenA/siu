@@ -19,6 +19,13 @@ class Link:
         self.ser = serial.Serial(port, baud, timeout=0.001)
         self.buf = bytearray()
         self.bad_frames = 0
+        self.trace = False          # print every frame, TLV by TLV
+        self.on_log = None          # callable(line) for the SIU's LOG_TEXT lines
+        self.last_raw = b""         # raw bytes of the last valid frame received
+        # A lone delimiter flushes whatever the SIU's receiver holds (e.g. a glitch byte from the
+        # adapter when the port opened), so the first real frame isn't glued to it.
+        self.ser.write(b"\x00")
+        time.sleep(0.002)
 
     def close(self) -> None:
         self.ser.close()
@@ -26,10 +33,14 @@ class Link:
     # ---- sending ------------------------------------------------------------
 
     def send(self, frame: p.Frame) -> None:
+        if self.trace:
+            print(p.format_frame("TX ->", frame))
         self.ser.write(p.encode_wire(frame))
 
     def send_raw(self, raw: bytes) -> None:
         """A raw (un-encoded) frame — lets tests send broken CRCs, bad versions, etc."""
+        if self.trace:
+            print(f"TX -> raw {raw.hex(' ').upper()}")
         self.ser.write(p.cobs_encode(raw) + b"\x00")
 
     def send_bytes(self, data: bytes) -> None:
@@ -48,9 +59,20 @@ class Link:
                 if not wire:
                     continue
                 try:
-                    return p.decode_raw(p.cobs_decode(bytes(wire)))
-                except ValueError:
+                    raw = p.cobs_decode(bytes(wire))
+                    frame = p.decode_raw(raw)
+                    self.last_raw = raw
+                except ValueError as e:
                     self.bad_frames += 1
+                    if self.trace:
+                        print(f"RX <- BAD FRAME ({e}): {bytes(wire).hex(' ').upper()}")
+                    continue
+                if self.trace:
+                    print(p.format_frame("RX <-", frame))
+                if self.on_log:
+                    for line in p.log_lines(frame):
+                        self.on_log(line)
+                return frame
         return None
 
     def recv_wire(self, deadline: float) -> bytes | None:

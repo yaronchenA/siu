@@ -27,6 +27,7 @@ C_SRCS := \
 	app/link_session.c \
 	app/cmd_dispatch.c \
 	app/siu_config.c \
+	app/siu_log.c \
 	common/protocol/cobs.c \
 	common/protocol/crc16.c \
 	common/protocol/frame.c \
@@ -84,7 +85,7 @@ flash: $(BUILD)/$(TARGET).elf
 HOST_CFLAGS := -std=c11 -Wall -Wextra -Werror -Icommon -Icommon/protocol -Iapp
 PROTO_SRCS  := common/protocol/cobs.c common/protocol/crc16.c common/protocol/frame.c
 HOST_DEPS   := $(wildcard app/*.h common/*.h common/protocol/*.h)
-TESTS       := test_led_ctrl test_protocol test_link_session
+TESTS       := test_led_ctrl test_protocol test_link_session test_siu_log
 
 $(BUILD)/host/test_led_ctrl: tests/test_led_ctrl.c app/led_ctrl.c $(HOST_DEPS)
 	@mkdir -p $(dir $@)
@@ -94,9 +95,13 @@ $(BUILD)/host/test_protocol: tests/test_protocol.c $(PROTO_SRCS) $(HOST_DEPS)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_CFLAGS) tests/test_protocol.c $(PROTO_SRCS) -o $@
 
-$(BUILD)/host/test_link_session: tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/siu_config.c app/led_ctrl.c $(PROTO_SRCS) $(HOST_DEPS)
+$(BUILD)/host/test_link_session: tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/siu_config.c app/siu_log.c app/led_ctrl.c $(PROTO_SRCS) $(HOST_DEPS)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(HOST_CFLAGS) tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/siu_config.c app/led_ctrl.c $(PROTO_SRCS) -o $@
+	$(HOST_CC) $(HOST_CFLAGS) tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/siu_config.c app/siu_log.c app/led_ctrl.c $(PROTO_SRCS) -o $@
+
+$(BUILD)/host/test_siu_log: tests/test_siu_log.c app/siu_log.c $(HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_CFLAGS) tests/test_siu_log.c app/siu_log.c -o $@
 
 test: $(TESTS:%=$(BUILD)/host/%)
 	@for t in $^; do echo "== $$t"; $$t || exit 1; done

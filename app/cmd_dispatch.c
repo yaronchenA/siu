@@ -5,6 +5,7 @@
 #include "led_ctrl.h"
 #include "proto.h"
 #include "siu_config.h"
+#include "siu_log.h"
 
 #define REQ_HISTORY 8u      /* last action REQ_IDs remembered per session (§5.2) */
 
@@ -17,6 +18,7 @@ typedef struct {
 } req_record_t;
 
 static cp_setpoint_t s_cp;
+static uint8_t       s_led_state = 0xFFu, s_led_pattern = 0xFFu;   /* for logging changes only */
 static req_record_t  s_history[REQ_HISTORY];
 static uint8_t       s_history_next;
 
@@ -24,6 +26,7 @@ void cmd_dispatch_reset(void)
 {
     s_cp.mode = CP_MODE_STATE_F;
     s_cp.duty_0p1pct = 0;
+    s_led_state = s_led_pattern = 0xFFu;
     memset(s_history, 0, sizeof s_history);
     s_history_next = 0;
 }
@@ -80,8 +83,12 @@ static uint8_t handle_cp_set(const uint8_t *val, uint8_t len)
     if (mode == CP_MODE_PWM && duty != 50u && (duty < 80u || duty > 970u)) {
         return PROTO_ERR_OUT_OF_RANGE;
     }
+    uint16_t new_duty = mode == CP_MODE_PWM ? duty : 0u;
+    if (mode != s_cp.mode || new_duty != s_cp.duty_0p1pct) {
+        siu_log("cp: mode %u duty %u.%u%%", mode, new_duty / 10u, new_duty % 10u);
+    }
     s_cp.mode = mode;
-    s_cp.duty_0p1pct = mode == CP_MODE_PWM ? duty : 0u;
+    s_cp.duty_0p1pct = new_duty;
     return 0;
 }
 
@@ -90,7 +97,15 @@ static uint8_t handle_led_set(const uint8_t *val, uint8_t len)
     if (len < TLV_LEN_LED_SET) {
         return PROTO_ERR_BAD_LENGTH;
     }
-    return led_ctrl_set_state(val[0], val[1]) ? 0u : (uint8_t)PROTO_ERR_OUT_OF_RANGE;
+    if (!led_ctrl_set_state(val[0], val[1])) {
+        return PROTO_ERR_OUT_OF_RANGE;
+    }
+    if (val[0] != s_led_state || val[1] != s_led_pattern) {
+        siu_log("led: state %u pattern %u", val[0], val[1]);
+        s_led_state = val[0];
+        s_led_pattern = val[1];
+    }
+    return 0;
 }
 
 static uint8_t handle_led_raw(const uint8_t *val, uint8_t len, bool service)
@@ -103,6 +118,8 @@ static uint8_t handle_led_raw(const uint8_t *val, uint8_t len, bool service)
     }
     const rgb_t c = { val[0], val[1], val[2] };
     led_ctrl_set_raw(c);
+    siu_log("led: raw %u,%u,%u", c.r, c.g, c.b);
+    s_led_state = s_led_pattern = 0xFFu;      /* the next LED_SET is a change again */
     return 0;
 }
 
@@ -138,6 +155,7 @@ static void do_auth_feedback(const uint8_t *val, uint32_t now_ms, uint8_t *resul
     }
     *result = PROTO_RESULT_OK;
     *detail = 0;
+    siu_log("auth: feedback %u", val[1]);
 }
 
 static void do_config_set(const uint8_t *val, uint8_t len, uint8_t *result, uint8_t *detail)
@@ -145,6 +163,7 @@ static void do_config_set(const uint8_t *val, uint8_t len, uint8_t *result, uint
     bool ok = siu_config_set(val[1], &val[2], (uint8_t)(len - 2u));
     *result = ok ? PROTO_RESULT_OK : PROTO_RESULT_REJECTED;
     *detail = ok ? 0u : 1u;  /* 1 = unknown key or invalid value */
+    siu_log("config: key 0x%02x = %u %s", val[1], len > 2u ? val[2] : 0u, ok ? "ok" : "REJECTED");
 }
 
 static uint8_t handle_action(uint8_t type, const uint8_t *val, uint8_t len, uint8_t min_len,
@@ -159,6 +178,7 @@ static uint8_t handle_action(uint8_t type, const uint8_t *val, uint8_t len, uint
     }
     const req_record_t *seen = find_request(req_id, type);
     if (seen != NULL) {                         /* duplicate: report again, don't re-execute */
+        siu_log("dup: REQ_ID %u (TLV 0x%02x) not re-executed", req_id, type);
         put_result(rsp, req_id, type, seen->result, seen->detail);
         return 0;
     }

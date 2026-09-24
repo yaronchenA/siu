@@ -16,6 +16,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, module list, and pin map.
 | Link session: handshake, sessions, duplicate cache, link timeout | Done, host-tested + bench-verified with the CPM emulator |
 | LED commands: `LED_SET`, `LED_RAW` (service), `AUTH_FEEDBACK` flashes, brightness (`CONFIG_SET/GET` key 0x01) | Done, host-tested + bench-verified |
 | Action duplicate filter (`REQ_ID` history, `RESULT`) | Done |
+| Debug log over the link (`LOG_TEXT`, `CONFIG_SET` key 0x10) | Done — printed by the emulator and the HIL tests |
 | `CP_SET` | Validated and stored — no CP hardware yet |
 | Lock control | Next |
 | Events, RFID, CP/PP, telemetry, config storage | Planned |
@@ -48,7 +49,7 @@ The Discovery board's ST-LINK/V2 has no USB drive and no virtual COM port — fl
 .venv/bin/python tools/cpm_emulator.py --port /dev/cu.usbserial-0001
 ```
 
-It performs the HELLO → SESSION_START handshake, prints the SIU's identity, then polls every 20 ms like a real CPM. Type commands while it runs:
+It performs the HELLO → SESSION_START handshake, prints the SIU's identity, then polls every 20 ms like a real CPM. The SIU's own debug log is switched on automatically and printed as `SIU log> ...` (the Discovery board has no USB console; the log travels in `LOG_TEXT` TLVs). `--trace` prints every frame TLV by TLV — try `--trace --duration 0.1`. Type commands while it runs:
 
 | Command | Effect |
 |---|---|
@@ -61,17 +62,26 @@ It performs the HELLO → SESSION_START handshake, prints the SIU's identity, th
 | `bad` | Sends an unknown TLV — SIU answers `ERROR UNKNOWN_TLV` |
 | `dup` | Sends the same SEQ twice — SIU must answer from its cache |
 | `stop` / `go` | Pause / resume polling — after 200 ms the SIU shows "no link" (red slow blink) |
+| `trace on` / `trace off` | Print every frame, TLV by TLV (raw bytes + meaning) |
+| `log on` / `log off` | Switch the SIU's debug log on / off |
 | `stats`, `quit` | |
 
 After reset the LED runs its self-test (red → green → blue), then blinks red slowly (no link) until the emulator connects.
 
 ## Hardware-in-the-loop tests
 
-`make hil` runs an automated pytest suite against the real SIU over the USB-serial adapter — 48 checks of the protocol spec: handshake and identity, session rules, every receive rule (bad CRC, wrong version, malformed TLV, oversize, wrong session, wrong direction), resync after line noise, duplicate SEQ and REQ_ID handling, link timeout and session end, error codes, `CP_SET` duty limits, LED commands, config, and 250 polls at 20 ms with no loss. Takes ~10 s.
+`make hil` runs an automated pytest suite against the real SIU over the USB-serial adapter — 62 tests:
+
+- protocol rules: handshake and identity, session rules, every receive rule (bad CRC, wrong version, malformed TLV, oversize, wrong session, wrong direction), resync after line noise, duplicate SEQ and REQ_ID handling, link timeout and session end, error codes, `CP_SET` duty limits, LED commands, config, and 250 polls at 20 ms with no loss;
+- exact TLV layouts: every response TLV has the length and field layout in the spec, and every received frame re-encodes to exactly the bytes on the wire;
+- the SIU's debug log: it reports commands, errors, duplicates, dropped frames and link timeouts, in whole lines, within the response size budget.
+
+When a test fails, pytest shows the SIU's log lines for that test. `--trace-frames` prints every frame. Takes ~13 s.
 
 ```sh
 make hil                               # default port /dev/cu.usbserial-0001
 make hil PORT=/dev/cu.usbserial-XXXX
+.venv/bin/python -m pytest tests/hil -v -s --trace-frames -k error_layout   # one test, with a frame trace
 ```
 
 Tests are skipped if the port isn't there. Flash the current firmware first (`make flash`).
