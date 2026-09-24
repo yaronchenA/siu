@@ -54,10 +54,11 @@ Rules:
 | `app/led_ctrl` | Status → colour/pattern, SIU-local overrides by priority, feedback flashes (siu_detailed_design.md §6.1) | **Done** (host-tested) |
 | `drivers/rgb_led` | Colour balance, brightness, gamma → PWM | **Done** |
 | `app/lock_ctrl` + `drivers/hbridge` | Lock until switch closes (1500 ms timeout), unlock to 1000 ms, manual-release mismatch (§5) | Next |
-| `common/protocol` | COBS, CRC-16/CCITT-FALSE, TLV walker/builder | Planned |
+| `common/protocol` | COBS, CRC-16/CCITT-FALSE, frame + TLV parse/build | **Done** (host-tested vs. spec §10 bytes) |
 | `drivers/rs485` | USART1, interrupt-driven RX/TX rings, hardware DE on PA12 | **Done** (bench-verified) |
-| `app/link_session` | Session state machine, `SEQ` response cache, link timeout; PendSV frame handling | Planned |
-| `app/cmd_dispatch`, `app/events` | TLV type → handler table; 8-entry event queue with ACK | Planned |
+| `app/link_session` + `src/link_task` | Session state machine, `SEQ` response cache, link timeout; frames handled in PendSV | **Done** (host-tested, bench-verified) |
+| `app/cmd_dispatch` | Command TLVs: `LED_SET`, `CP_SET` so far | **Partial** |
+| `app/events` | 8-entry event queue with ACK | Planned |
 | `app/cp_ctrl` + `drivers/cp_pwm_adc` | CP PWM/modes, A–F detection, diode check | Needs the ±12 V front-end |
 | `app/safety_mon` | Over-temp / link loss → CP state F; unlock gates | Planned |
 | `drivers/rc522`, `ntc`, `ac_sense`, `buzzer`, `cfg_flash` | Peripherals | Planned |
@@ -71,7 +72,8 @@ Rules:
 
 ## 6. Testing
 - `make test` — builds and runs the host unit tests (`tests/`) with the Mac's C compiler.
-- Python CPM emulator (planned, `tools/`) — drives the SIU over a USB-UART adapter using the real protocol; later reused as the production test fixture driver.
+- `tools/cpm_emulator.py` — drives the SIU over a USB-UART adapter using the real protocol; later reused as the production test fixture driver.
+- `tools/test_siu_proto.py` — checks the Python codec against the same spec bytes as the C tests (run by `make test`).
 
 ## 7. Directory layout
 

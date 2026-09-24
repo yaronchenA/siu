@@ -18,22 +18,29 @@ HOST_CC  := cc
 
 C_SRCS := \
 	src/main.c \
+	src/link_task.c \
 	board/board_f0308disco.c \
 	drivers/rgb_led.c \
 	drivers/rs485.c \
 	app/led_ctrl.c \
+	app/link_session.c \
+	app/cmd_dispatch.c \
+	common/protocol/cobs.c \
+	common/protocol/crc16.c \
+	common/protocol/frame.c \
 	$(ST)/cmsis_device_f0/Source/system_stm32f0xx.c
 
 ASM_SRCS := $(ST)/cmsis_device_f0/Source/startup_stm32f030x8.s
 
 # Vendor headers via -isystem: their warnings aren't ours to fix.
 INCLUDES := \
-	-Icommon -Iapp -Idrivers -Iboard \
+	-Icommon -Icommon/protocol -Iapp -Idrivers -Iboard -Isrc \
 	-isystem $(ST)/cmsis_core/Include \
 	-isystem $(ST)/cmsis_device_f0/Include \
 	-isystem $(ST)/stm32f0xx_ll/Inc
 
-DEFS     := -DSTM32F030x8 -DUSE_FULL_LL_DRIVER
+GIT_HASH := $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo 0)
+DEFS     := -DSTM32F030x8 -DUSE_FULL_LL_DRIVER -DBUILD_ID=0x$(GIT_HASH)u
 CPUFLAGS := -mcpu=cortex-m0 -mthumb
 CFLAGS   := $(CPUFLAGS) $(DEFS) $(INCLUDES) -Os -g3 -std=c11 -Wall -Wextra \
             -ffunction-sections -fdata-sections -MMD -MP
@@ -72,15 +79,27 @@ flash: $(BUILD)/$(TARGET).elf
 
 # ---- host unit tests ----------------------------------------------------------
 
-HOST_CFLAGS := -std=c11 -Wall -Wextra -Werror -Icommon -Iapp
-TESTS := test_led_ctrl
+HOST_CFLAGS := -std=c11 -Wall -Wextra -Werror -Icommon -Icommon/protocol -Iapp
+PROTO_SRCS  := common/protocol/cobs.c common/protocol/crc16.c common/protocol/frame.c
+HOST_DEPS   := $(wildcard app/*.h common/*.h common/protocol/*.h)
+TESTS       := test_led_ctrl test_protocol test_link_session
 
-$(BUILD)/host/test_led_ctrl: tests/test_led_ctrl.c app/led_ctrl.c app/led_ctrl.h common/rgb.h
+$(BUILD)/host/test_led_ctrl: tests/test_led_ctrl.c app/led_ctrl.c $(HOST_DEPS)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_CFLAGS) tests/test_led_ctrl.c app/led_ctrl.c -o $@
 
+$(BUILD)/host/test_protocol: tests/test_protocol.c $(PROTO_SRCS) $(HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_CFLAGS) tests/test_protocol.c $(PROTO_SRCS) -o $@
+
+$(BUILD)/host/test_link_session: tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/led_ctrl.c $(PROTO_SRCS) $(HOST_DEPS)
+	@mkdir -p $(dir $@)
+	$(HOST_CC) $(HOST_CFLAGS) tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/led_ctrl.c $(PROTO_SRCS) -o $@
+
 test: $(TESTS:%=$(BUILD)/host/%)
 	@for t in $^; do echo "== $$t"; $$t || exit 1; done
+	@if [ -x .venv/bin/python ]; then echo "== tools/test_siu_proto.py"; .venv/bin/python tools/test_siu_proto.py; \
+	 else echo "(skipping Python tests: create .venv, see README)"; fi
 
 clean:
 	rm -rf $(BUILD)

@@ -11,9 +11,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, module list, and pin map.
 | Build system, ST CMSIS + LL, 48 MHz clock, 1 ms tick | Done |
 | Status LED logic (`app/led_ctrl`) — all states, overrides, feedback | Done, host-tested |
 | RGB LED driver (TIM3 PWM) | Done |
-| RS485 link driver (USART1, interrupt-driven, hardware DE) | Done, verified on the bench via USB-serial adapter |
-| CPM↔SIU protocol + Python CPM emulator | Next |
-| Lock control | Planned |
+| RS485 link driver (USART1, interrupt-driven, hardware DE) | Done, bench-verified |
+| Protocol codec (`common/protocol`: COBS, CRC-16, frames/TLVs) | Done, host-tested against the spec's reference bytes |
+| Link session: handshake, sessions, duplicate cache, link timeout, `LED_SET`, `CP_SET` (stored) | Done, host-tested + bench-verified with the CPM emulator |
+| Lock control | Next |
+| Events, RFID, CP/PP, telemetry, config storage | Planned |
 
 ## Toolchain
 
@@ -31,23 +33,31 @@ make flash    # program the board
 
 The Discovery board's ST-LINK/V2 has no USB drive and no virtual COM port — flash with `make flash`, and use a separate 3.3 V USB-UART adapter for a debug console. The Makefile selects this board's ST-LINK by USB ID, so a CPM Nucleo can stay plugged in at the same time.
 
-## Demo (current firmware)
+## Bench setup
 
-After reset the LED runs its self-test (red → green → blue), then shows **Available** (green).
+- 3.3 V USB-serial adapter on the CPM link UART: adapter TXD → PA10, RXD ← PA9, GND ↔ GND (ARCHITECTURE.md §8).
+- Optional: an LED from **PC6** through ~470 Ω to GND for the red channel — the board only has green (LD3) and blue (LD4), so red, amber, white and purple need it.
+- Python tools, once: `python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt`
 
-- **Short press** of the blue user button: step to the next status — Available, SuspendedEVSE, Charging, Faulted, Reserved, Stopped, Updating, Authorizing, SuspendedEV, Preparing, Finishing, Unavailable, Pending approval.
-- **Long press** (≥ 0.6 s): step through card-accepted flashes, card-rejected flashes, stop button on/off, no-link on/off, factory mode on/off.
-
-The board only has a green (LD3) and a blue (LD4) LED. For red, and for mixed colours like amber and white, connect an LED from **PC6** through ~470 Ω to GND.
-
-## Link test (current firmware)
-
-The SIU sends `SIU alive, uptime N s` once a second on the CPM link UART and echoes every line it receives. With a 3.3 V USB-serial adapter wired to PA9/PA10/GND (see ARCHITECTURE.md §8):
+## Driving the SIU from the PC (CPM emulator)
 
 ```sh
-python3 -m venv .venv && .venv/bin/pip install -r tools/requirements.txt   # once
-.venv/bin/python tools/link_test.py --port /dev/cu.usbserial-0001
+.venv/bin/python tools/cpm_emulator.py --port /dev/cu.usbserial-0001
 ```
+
+It performs the HELLO → SESSION_START handshake, prints the SIU's identity, then polls every 20 ms like a real CPM. Type commands while it runs:
+
+| Command | Effect |
+|---|---|
+| `led charging` / `led 3` / `led available 2` | `LED_SET` by name or number, optional pattern |
+| `cp f` / `cp 12v` / `cp pwm 26.7` | `CP_SET` (stored; no CP hardware yet) |
+| `ident` | `IDENT_GET` — SIU resends its identity |
+| `bad` | Sends an unknown TLV — SIU answers `ERROR UNKNOWN_TLV` |
+| `dup` | Sends the same SEQ twice — SIU must answer from its cache |
+| `stop` / `go` | Pause / resume polling — after 200 ms the SIU shows "no link" (red slow blink) |
+| `stats`, `quit` | |
+
+After reset the LED runs its self-test (red → green → blue), then blinks red slowly (no link) until the emulator connects.
 
 ## Layout
 

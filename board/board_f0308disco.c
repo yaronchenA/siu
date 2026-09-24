@@ -12,7 +12,9 @@
  */
 #include "board.h"
 
+#include "proto.h"
 #include "stm32f0xx.h"
+#include "stm32f0xx_ll_adc.h"
 #include "stm32f0xx_ll_bus.h"
 #include "stm32f0xx_ll_gpio.h"
 #include "stm32f0xx_ll_rcc.h"
@@ -118,6 +120,86 @@ void board_init(void)
 bool board_button_pressed(void)
 {
     return LL_GPIO_IsInputPinSet(GPIOA, LL_GPIO_PIN_0) != 0u;
+}
+
+void board_uid(uint8_t out[12])
+{
+    const volatile uint8_t *uid = (const volatile uint8_t *)UID_BASE;
+    for (unsigned i = 0; i < 12u; i++) {
+        out[i] = uid[i];
+    }
+}
+
+uint8_t board_reset_reason(void)
+{
+    uint8_t reason;
+    /* Power-on sets the pin-reset flag too, so check power-on first. */
+    if (LL_RCC_IsActiveFlag_PORRST()) {
+        reason = RESET_POWER_ON;
+    } else if (LL_RCC_IsActiveFlag_IWDGRST() || LL_RCC_IsActiveFlag_WWDGRST()) {
+        reason = RESET_WATCHDOG;
+    } else if (LL_RCC_IsActiveFlag_SFTRST()) {
+        reason = RESET_SOFTWARE;
+    } else {
+        reason = RESET_PIN;
+    }
+    LL_RCC_ClearResetFlags();
+    return reason;
+}
+
+uint32_t board_random32(void)
+{
+    /* The lowest bit of fast, back-to-back temperature-sensor conversions is noise.
+     * The ADC is left disabled afterwards; the CP driver will set it up for its own use. */
+    LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_ADC1);
+    LL_ADC_SetClock(ADC1, LL_ADC_CLOCK_SYNC_PCLK_DIV4);
+    LL_ADC_StartCalibration(ADC1);
+    while (LL_ADC_IsCalibrationOnGoing(ADC1)) {
+    }
+    for (volatile unsigned i = 0; i < 64u; i++) {   /* errata: ADEN can't be set right after calibration */
+    }
+    LL_ADC_SetCommonPathInternalCh(__LL_ADC_COMMON_INSTANCE(ADC1), LL_ADC_PATH_INTERNAL_TEMPSENSOR);
+    LL_ADC_REG_SetSequencerChannels(ADC1, LL_ADC_CHANNEL_TEMPSENSOR);
+    LL_ADC_SetSamplingTimeCommonChannels(ADC1, LL_ADC_SAMPLINGTIME_1CYCLE_5);
+    LL_ADC_Enable(ADC1);
+    while (!LL_ADC_IsActiveFlag_ADRDY(ADC1)) {
+    }
+
+    uint8_t uid[12];
+    board_uid(uid);
+    uint32_t x = 2166136261u;                   /* FNV-1a over the UID ... */
+    for (unsigned i = 0; i < sizeof uid; i++) {
+        x = (x ^ uid[i]) * 16777619u;
+    }
+    for (unsigned i = 0; i < 64u; i++) {        /* ... and 64 noise samples */
+        LL_ADC_REG_StartConversion(ADC1);
+        while (!LL_ADC_IsActiveFlag_EOC(ADC1)) {
+        }
+        x = (x ^ LL_ADC_REG_ReadConversionData12(ADC1)) * 16777619u;
+    }
+
+    LL_ADC_Disable(ADC1);
+    while (LL_ADC_IsEnabled(ADC1)) {
+    }
+    LL_ADC_SetCommonPathInternalCh(__LL_ADC_COMMON_INSTANCE(ADC1), LL_ADC_PATH_INTERNAL_NONE);
+    return x;
+}
+
+uint32_t board_critical_enter(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    return primask;
+}
+
+void board_critical_exit(uint32_t state)
+{
+    __set_PRIMASK(state);
+}
+
+void board_link_task_pend(void)
+{
+    SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
 }
 
 void board_link_uart_pins_init(void)

@@ -15,6 +15,7 @@ static volatile uint16_t s_rx_head, s_rx_tail;   /* ISR writes head, main reads 
 static volatile uint8_t  s_tx[TX_SIZE];
 static volatile uint16_t s_tx_head, s_tx_tail;   /* main writes head, ISR reads tail */
 static volatile uint32_t s_rx_dropped;
+static void (*s_frame_end_hook)(void);
 
 void rs485_init(void)
 {
@@ -56,6 +57,9 @@ void USART1_IRQHandler(void)
             s_rx[s_rx_head] = b;
             s_rx_head = next;
         }
+        if (b == 0x00u && s_frame_end_hook != NULL) {
+            s_frame_end_hook();
+        }
     }
     if (LL_USART_IsEnabledIT_TXE(USART1) && LL_USART_IsActiveFlag_TXE(USART1)) {
         if (s_tx_tail == s_tx_head) {
@@ -96,4 +100,9 @@ size_t rs485_read(uint8_t *buf, size_t max)
 uint32_t rs485_rx_dropped(void)
 {
     return s_rx_dropped;
+}
+
+void rs485_set_frame_end_hook(void (*hook)(void))
+{
+    s_frame_end_hook = hook;
 }
