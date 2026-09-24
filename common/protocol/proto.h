@@ -104,6 +104,11 @@ enum {
 #define TLV_LEN_FW_INFO          8u
 #define TLV_LEN_CP_SET           3u
 #define TLV_LEN_LED_SET          2u
+#define TLV_LEN_LED_RAW          3u
+#define TLV_LEN_AUTH_FEEDBACK    2u
+#define TLV_LEN_RESULT           4u
+#define TLV_LEN_CONFIG_GET       1u
+#define TLV_LEN_CONFIG_SET_MIN   3u      /* req_id, key, >= 1 value byte */
 #define TLV_LEN_STATUS_FAST     13u
 
 /* ERROR.code (§8.10) */

@@ -72,6 +72,12 @@ void led_ctrl_init(uint32_t now_ms);
 /* From LED_SET. Returns false (and changes nothing) if a value is out of range. */
 bool led_ctrl_set_state(uint8_t ui_state, uint8_t pattern);
 
+/* From LED_RAW (service only): show this exact colour, solid, until the next led_ctrl_set_state().
+ * Shown above every override except the power-on self-test — production test runs in factory mode
+ * and must still be able to check each colour channel (manufacturing_procedures.md §6, S14).
+ * A stop, over-temperature or no-link override that becomes active cancels it. */
+void led_ctrl_set_raw(rgb_t c);
+
 /* Activate / clear a local override. When ESTOP, OVERTEMP or NOLINK clears, its look is
  * held until the next led_ctrl_set_state() — never falls back to a stale commanded status. */
 void led_ctrl_set_override(led_override_t ovr, bool active);

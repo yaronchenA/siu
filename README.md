@@ -13,7 +13,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, module list, and pin map.
 | RGB LED driver (TIM3 PWM) | Done |
 | RS485 link driver (USART1, interrupt-driven, hardware DE) | Done, bench-verified |
 | Protocol codec (`common/protocol`: COBS, CRC-16, frames/TLVs) | Done, host-tested against the spec's reference bytes |
-| Link session: handshake, sessions, duplicate cache, link timeout, `LED_SET`, `CP_SET` (stored) | Done, host-tested + bench-verified with the CPM emulator |
+| Link session: handshake, sessions, duplicate cache, link timeout | Done, host-tested + bench-verified with the CPM emulator |
+| LED commands: `LED_SET`, `LED_RAW` (service), `AUTH_FEEDBACK` flashes, brightness (`CONFIG_SET/GET` key 0x01) | Done, host-tested + bench-verified |
+| Action duplicate filter (`REQ_ID` history, `RESULT`) | Done |
+| `CP_SET` | Validated and stored — no CP hardware yet |
 | Lock control | Next |
 | Events, RFID, CP/PP, telemetry, config storage | Planned |
 
@@ -50,6 +53,9 @@ It performs the HELLO → SESSION_START handshake, prints the SIU's identity, th
 | Command | Effect |
 |---|---|
 | `led charging` / `led 3` / `led available 2` | `LED_SET` by name or number, optional pattern |
+| `raw 255 110 0` | `LED_RAW` with the SERVICE flag — exact colour until the next `led` |
+| `auth accepted` / `rejected` / `pending` / `expired` | `AUTH_FEEDBACK` — green or red feedback flashes |
+| `bright 40` / `getbright` | LED brightness via `CONFIG_SET` / `CONFIG_GET` |
 | `cp f` / `cp 12v` / `cp pwm 26.7` | `CP_SET` (stored; no CP hardware yet) |
 | `ident` | `IDENT_GET` — SIU resends its identity |
 | `bad` | Sends an unknown TLV — SIU answers `ERROR UNKNOWN_TLV` |

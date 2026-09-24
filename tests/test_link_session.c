@@ -6,6 +6,7 @@
 #include "led_ctrl.h"
 #include "link_session.h"
 #include "proto.h"
+#include "siu_config.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -119,6 +120,7 @@ static void bring_up(void)
 {
     led_ctrl_init(0);
     (void)led_ctrl_update(1000);        /* self-test over */
+    siu_config_init();
     cmd_dispatch_reset();
     link_session_init(&k_id, 1000);
     send_hello(1, 1000);
@@ -343,6 +345,112 @@ static void test_session_end_and_new_hello(void)
     CHECK(g_rsp_len > 0 && link_session_state() == LINK_HANDSHAKE);
 }
 
+static void test_led_raw_needs_service_flag(void)
+{
+    bring_up();
+    req_t q;
+    const uint8_t raw[] = { 10, 20, 30 };
+    req_begin(&q, 0, 3, 7);
+    req_put(&q, TLV_LED_RAW, raw, sizeof raw);
+    req_send(&q, 1030);
+    uint8_t len;
+    const uint8_t *e = rsp_tlv(TLV_ERROR, &len);
+    CHECK(e && e[0] == TLV_LED_RAW && e[1] == PROTO_ERR_SERVICE_REQUIRED);
+
+    req_begin(&q, PROTO_FLAG_SERVICE, 4, 7);
+    req_put(&q, TLV_LED_RAW, raw, sizeof raw);
+    req_send(&q, 1040);
+    CHECK(rsp_tlv(TLV_ERROR, NULL) == NULL);
+    rgb_t c = led_ctrl_update(1040);
+    CHECK(c.r == 10 && c.g == 20 && c.b == 30);
+}
+
+/* Returns the RESULT TLV value (4 bytes) of the last response, or NULL. */
+static const uint8_t *last_result(void)
+{
+    uint8_t len;
+    const uint8_t *v = rsp_tlv(TLV_RESULT, &len);
+    return (v && len >= 4) ? v : NULL;
+}
+
+static void test_auth_feedback_result_and_duplicate_req_id(void)
+{
+    bring_up();
+    req_t q;
+    const uint8_t led[] = { UI_PREPARING, 0 };             /* white: feedback plays over it */
+    const uint8_t accepted[] = { 42, 0 };
+    req_begin(&q, 0, 3, 7);
+    req_put(&q, TLV_LED_SET, led, sizeof led);
+    req_put(&q, TLV_AUTH_FEEDBACK, accepted, sizeof accepted);
+    req_send(&q, 1030);
+    const uint8_t *r = last_result();
+    CHECK(r && r[0] == 42 && r[1] == TLV_AUTH_FEEDBACK && r[2] == PROTO_RESULT_OK);
+    rgb_t c = led_ctrl_update(1030);
+    CHECK(c.r == 0 && c.g == 255 && c.b == 0);             /* green flash */
+    c = led_ctrl_update(1030 + 700);
+    CHECK(c.r == 255 && c.g == 255 && c.b == 255);         /* back to white */
+
+    /* same REQ_ID in a new frame (new SEQ): reported again, not replayed */
+    req_begin(&q, 0, 4, 7);
+    req_put(&q, TLV_AUTH_FEEDBACK, accepted, sizeof accepted);
+    req_send(&q, 2000);
+    r = last_result();
+    CHECK(r && r[0] == 42 && r[2] == PROTO_RESULT_OK);
+    c = led_ctrl_update(2000);
+    CHECK(c.r == 255 && c.g == 255 && c.b == 255);         /* no second flash */
+
+    const uint8_t bad[] = { 43, 9 };                       /* unknown result code */
+    req_begin(&q, 0, 5, 7);
+    req_put(&q, TLV_AUTH_FEEDBACK, bad, sizeof bad);
+    req_send(&q, 2100);
+    r = last_result();
+    CHECK(r && r[0] == 43 && r[2] == PROTO_RESULT_REJECTED);
+
+    const uint8_t zero_id[] = { 0, 0 };                    /* REQ_ID 0 is reserved */
+    req_begin(&q, 0, 6, 7);
+    req_put(&q, TLV_AUTH_FEEDBACK, zero_id, sizeof zero_id);
+    req_send(&q, 2200);
+    uint8_t len;
+    const uint8_t *e = rsp_tlv(TLV_ERROR, &len);
+    CHECK(e && e[1] == PROTO_ERR_OUT_OF_RANGE);
+}
+
+static void test_config_brightness(void)
+{
+    bring_up();
+    CHECK(siu_config_led_brightness() == 100);
+    req_t q;
+    const uint8_t set[] = { 5, CFG_KEY_LED_BRIGHTNESS, 40 };
+    req_begin(&q, 0, 3, 7);
+    req_put(&q, TLV_CONFIG_SET, set, sizeof set);
+    req_send(&q, 1030);
+    const uint8_t *r = last_result();
+    CHECK(r && r[0] == 5 && r[1] == TLV_CONFIG_SET && r[2] == PROTO_RESULT_OK);
+    CHECK(siu_config_led_brightness() == 40);
+
+    const uint8_t get[] = { CFG_KEY_LED_BRIGHTNESS };
+    req_begin(&q, 0, 4, 7);
+    req_put(&q, TLV_CONFIG_GET, get, sizeof get);
+    req_send(&q, 1040);
+    uint8_t len;
+    const uint8_t *v = rsp_tlv(TLV_CONFIG_VALUE, &len);
+    CHECK(v && len == 2 && v[0] == CFG_KEY_LED_BRIGHTNESS && v[1] == 40);
+
+    const uint8_t too_bright[] = { 6, CFG_KEY_LED_BRIGHTNESS, 101 };
+    const uint8_t unknown_key[] = { 7, 0x7F, 1 };
+    req_begin(&q, 0, 5, 7);
+    req_put(&q, TLV_CONFIG_SET, too_bright, sizeof too_bright);
+    req_send(&q, 1050);
+    r = last_result();
+    CHECK(r && r[2] == PROTO_RESULT_REJECTED);
+    req_begin(&q, 0, 6, 7);
+    req_put(&q, TLV_CONFIG_SET, unknown_key, sizeof unknown_key);
+    req_send(&q, 1060);
+    r = last_result();
+    CHECK(r && r[2] == PROTO_RESULT_REJECTED);
+    CHECK(siu_config_led_brightness() == 40);
+}
+
 int main(void)
 {
     struct { const char *name; void (*fn)(void); } tests[] = {
@@ -357,6 +465,9 @@ int main(void)
         { "cp_set_validation",                        test_cp_set_validation },
         { "link_timeout_goes_safe",                   test_link_timeout_goes_safe },
         { "session_end_and_new_hello",                test_session_end_and_new_hello },
+        { "led_raw_needs_service_flag",               test_led_raw_needs_service_flag },
+        { "auth_feedback_result_and_duplicate_req_id", test_auth_feedback_result_and_duplicate_req_id },
+        { "config_brightness",                        test_config_brightness },
     };
     for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++) {
         int before = g_failures;

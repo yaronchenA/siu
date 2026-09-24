@@ -56,6 +56,9 @@ static struct {
     bool      override_active[LED_OVR_COUNT];
     uint32_t  selftest_start_ms;
 
+    bool      raw_active;          /* LED_RAW showing, until the next LED_SET */
+    rgb_t     raw;
+
     bool      commanded_valid;     /* a LED_SET arrived since the last hold began */
     look_t    commanded;
 
@@ -126,6 +129,7 @@ void led_ctrl_init(uint32_t now_ms)
     s.holding = false;
     s.fb_active = false;
     s.shown_valid = false;
+    s.raw_active = false;
 }
 
 bool led_ctrl_set_state(uint8_t ui_state, uint8_t pattern)
@@ -139,7 +143,15 @@ bool led_ctrl_set_state(uint8_t ui_state, uint8_t pattern)
     }
     s.commanded_valid = true;
     s.holding = false;
+    s.raw_active = false;
     return true;
+}
+
+void led_ctrl_set_raw(rgb_t c)
+{
+    s.raw = c;
+    s.raw_active = true;
+    s.fb_active = false;
 }
 
 void led_ctrl_set_override(led_override_t ovr, bool active)
@@ -151,6 +163,9 @@ void led_ctrl_set_override(led_override_t ovr, bool active)
 
     if (active) {
         s.fb_active = false;   /* a fault or stop cancels any feedback animation */
+        if (ovr >= LED_OVR_ESTOP) {
+            s.raw_active = false;   /* ... and a leftover LED_RAW must never hide it */
+        }
     } else if (ovr == LED_OVR_ESTOP || ovr == LED_OVR_OVERTEMP || ovr == LED_OVR_NOLINK) {
         /* Don't fall back to a possibly stale commanded status: hold until the CPM re-sends. */
         s.hold = k_override_look[ovr];
@@ -173,7 +188,7 @@ void led_ctrl_feedback(led_feedback_t fb, uint32_t now_ms)
 {
     static const rgb_t green = RGB_GREEN, red = RGB_RED;
 
-    if (active_override() >= 0 || s.holding || !s.commanded_valid) {
+    if (active_override() >= 0 || s.holding || !s.commanded_valid || s.raw_active) {
         return;
     }
     switch (fb) {
@@ -192,6 +207,11 @@ rgb_t led_ctrl_update(uint32_t now_ms)
 
     if (s.override_active[LED_OVR_SELFTEST] && (now_ms - s.selftest_start_ms) >= SELFTEST_MS) {
         s.override_active[LED_OVR_SELFTEST] = false;
+    }
+
+    if (s.raw_active && !s.override_active[LED_OVR_SELFTEST]) {
+        s.shown_valid = false;
+        return s.raw;
     }
 
     /* Feedback flashes take over the commanded status while they run. */

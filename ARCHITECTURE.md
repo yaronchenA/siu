@@ -57,7 +57,8 @@ Rules:
 | `common/protocol` | COBS, CRC-16/CCITT-FALSE, frame + TLV parse/build | **Done** (host-tested vs. spec §10 bytes) |
 | `drivers/rs485` | USART1, interrupt-driven RX/TX rings, hardware DE on PA12 | **Done** (bench-verified) |
 | `app/link_session` + `src/link_task` | Session state machine, `SEQ` response cache, link timeout; frames handled in PendSV | **Done** (host-tested, bench-verified) |
-| `app/cmd_dispatch` | Command TLVs: `LED_SET`, `CP_SET` so far | **Partial** |
+| `app/cmd_dispatch` | Command TLVs: `LED_SET`, `LED_RAW`, `AUTH_FEEDBACK`, `CONFIG_SET/GET`, `CP_SET`; `REQ_ID` duplicate filter + `RESULT` for actions | **Partial** (grows per peripheral) |
+| `app/siu_config` | Settings from `CONFIG_SET` (LED brightness so far); RAM only until `cfg_flash` | **Partial** |
 | `app/events` | 8-entry event queue with ACK | Planned |
 | `app/cp_ctrl` + `drivers/cp_pwm_adc` | CP PWM/modes, A–F detection, diode check | Needs the ±12 V front-end |
 | `app/safety_mon` | Over-temp / link loss → CP state F; unlock gates | Planned |

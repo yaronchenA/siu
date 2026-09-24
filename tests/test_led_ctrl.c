@@ -198,6 +198,36 @@ static void test_feedback_never_over_fault(void)
     CHECK(RED(led_ctrl_update(t + 1000)));
 }
 
+static void test_raw_overrides_until_led_set(void)
+{
+    uint32_t t = boot_past_selftest();
+    led_ctrl_set_state(UI_CHARGING, 0);
+    led_ctrl_set_override(LED_OVR_FACTORY, true);          /* production test runs in factory mode */
+    const rgb_t teal = { 0, 128, 128 };
+    led_ctrl_set_raw(teal);
+    CHECK(is(led_ctrl_update(t), 0, 128, 128));
+    CHECK(is(led_ctrl_update(t + 600), 0, 128, 128));      /* solid, no blinking */
+
+    led_ctrl_feedback(LED_FB_ACCEPTED, t);                 /* no feedback over raw */
+    CHECK(is(led_ctrl_update(t + 10), 0, 128, 128));
+
+    led_ctrl_set_override(LED_OVR_FACTORY, false);
+    led_ctrl_set_state(UI_AVAILABLE, 0);                   /* next LED_SET ends raw mode */
+    CHECK(GREEN(led_ctrl_update(t + 1000)));
+}
+
+static void test_raw_cancelled_by_safety_override(void)
+{
+    uint32_t t = boot_past_selftest();
+    led_ctrl_set_state(UI_AVAILABLE, 0);
+    const rgb_t white = { 255, 255, 255 };
+    led_ctrl_set_raw(white);
+    led_ctrl_set_override(LED_OVR_NOLINK, true);
+    CHECK(RED(led_ctrl_update(t)));                        /* "no link" wins over leftover raw */
+    led_ctrl_set_override(LED_OVR_NOLINK, false);
+    CHECK(RED(led_ctrl_update(t + 1000)));                 /* held, raw not resurrected */
+}
+
 int main(void)
 {
     struct { const char *name; void (*fn)(void); } tests[] = {
@@ -212,6 +242,8 @@ int main(void)
         { "factory_mode_alternates",         test_factory_mode_alternates },
         { "feedback_flashes",                test_feedback_flashes },
         { "feedback_never_over_fault",       test_feedback_never_over_fault },
+        { "raw_overrides_until_led_set",     test_raw_overrides_until_led_set },
+        { "raw_cancelled_by_safety_override", test_raw_cancelled_by_safety_override },
     };
     for (size_t i = 0; i < sizeof tests / sizeof tests[0]; i++) {
         int before = g_failures;

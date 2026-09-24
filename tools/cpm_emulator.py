@@ -9,6 +9,10 @@ and LED_SET, retries lost requests, detects link loss and re-handshakes.
 
 Commands while running (type + Enter):
     led <state> [pattern]   state by name or number, e.g. "led charging", "led 3"; pattern 0-4
+    raw <r> <g> <b>         LED_RAW (sent with the SERVICE flag), 0-255 each; cleared by the next led
+    auth <result>           AUTH_FEEDBACK: accepted | rejected | pending | expired
+    bright <percent>        CONFIG_SET LED brightness, 0-100
+    getbright               CONFIG_GET LED brightness
     cp f | cp 12v | cp pwm <percent>
     ident                   ask the SIU to resend its identity
     bad                     send an unknown TLV (expect an ERROR back)
@@ -75,6 +79,8 @@ class Emulator:
         self.cp = p.cp_set(p.CP_MODE_STATE_F)
         self.led_sent_at = 0.0
         self.extra: list[tuple[int, bytes]] = []
+        self.service_next = False
+        self.req_id = 0
         self.dup_next = False
         self.paused = False
         self.last_status: str | None = None
@@ -83,11 +89,15 @@ class Emulator:
         self.seq = (self.seq + 1) & 0xFF
         return self.seq
 
-    def exchange(self, tlvs, session: int, retries: int = 2) -> p.Frame | None:
+    def next_req_id(self) -> int:
+        self.req_id = self.req_id % 255 + 1          # 1..255, 0 is reserved
+        return self.req_id
+
+    def exchange(self, tlvs, session: int, retries: int = 2, service: bool = False) -> p.Frame | None:
         """One request with retries (same SEQ, RETRY flag). Returns the matching response."""
         seq = self.next_seq()
         for attempt in range(retries + 1):
-            flags = p.FLAG_RETRY if attempt else 0
+            flags = (p.FLAG_RETRY if attempt else 0) | (p.FLAG_SERVICE if service else 0)
             t0 = time.monotonic()
             self.link.send(p.Frame(flags, seq, session, list(tlvs)))
             deadline = t0 + self.args.rsp_timeout_ms / 1000
@@ -131,9 +141,10 @@ class Emulator:
             self.led_sent_at = now
         tlvs += self.extra
         self.extra = []
+        service, self.service_next = self.service_next, False
 
         stats["polls"] += 1
-        rsp = self.exchange(tlvs, self.session)
+        rsp = self.exchange(tlvs, self.session, service=service)
         if rsp is not None and self.dup_next:
             self.dup_next = False
             # Resend the identical request (same SEQ): the SIU must answer from its cache.
@@ -147,6 +158,8 @@ class Emulator:
         for e in p.describe_errors(rsp):
             stats["errors"] += 1
             print(f"   SIU> {e}")
+        for r in p.describe_results(rsp):
+            print(f"   SIU> {r}")
         if (v := rsp.find(p.STATUS_FAST)) is not None:
             s = str(p.StatusFast.parse(v))
             if s != self.last_status:
@@ -180,6 +193,17 @@ class Emulator:
                 else:
                     self.cp = p.cp_set(p.CP_MODE_PWM, round(float(words[2]) * 10))
                 print(f"-- CP_SET {self.cp[1].hex()}")
+            elif cmd == "raw":
+                r, g, b = (int(x) for x in words[1:4])
+                self.extra.append(p.led_raw(r, g, b))
+                self.service_next = True
+                print(f"-- LED_RAW {r} {g} {b} (SERVICE)")
+            elif cmd == "auth":
+                self.extra.append(p.auth_feedback(self.next_req_id(), p.AUTH_RESULTS[words[1].lower()]))
+            elif cmd == "bright":
+                self.extra.append(p.config_set(self.next_req_id(), p.CFG_LED_BRIGHTNESS, bytes([int(words[1])])))
+            elif cmd == "getbright":
+                self.extra.append(p.config_get(p.CFG_LED_BRIGHTNESS))
             elif cmd == "ident":
                 self.extra.append((p.IDENT_GET, b""))
             elif cmd == "bad":
@@ -196,7 +220,7 @@ class Emulator:
                 print_stats()
             else:
                 print(f"-- unknown command: {line}")
-        except (IndexError, ValueError):
+        except (IndexError, ValueError, KeyError):
             print(f"-- can't parse: {line}")
         return True
 

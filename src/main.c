@@ -15,13 +15,14 @@
 #include "proto.h"
 #include "rgb_led.h"
 #include "rs485.h"
+#include "siu_config.h"
 
 #ifndef BUILD_ID
 #define BUILD_ID 0u   /* set by the Makefile to the short git hash */
 #endif
 
 #define FW_MAJOR 0u
-#define FW_MINOR 2u
+#define FW_MINOR 3u
 #define FW_PATCH 0u
 
 #define LED_UPDATE_MS 10u
@@ -59,6 +60,7 @@ int main(void)
     identity_init();
 
     uint32_t now = board_millis();
+    siu_config_init();
     led_ctrl_init(now);
     cmd_dispatch_reset();
     rs485_init();
@@ -77,7 +79,9 @@ int main(void)
             last_led_ms = now;
             uint32_t cs = board_critical_enter();   /* LED_SET arrives in the link task */
             rgb_t c = led_ctrl_update(now);
+            uint8_t brightness = siu_config_led_brightness();
             board_critical_exit(cs);
+            rgb_led_set_brightness(brightness);
             rgb_led_show(c);
         }
     }

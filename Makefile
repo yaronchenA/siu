@@ -25,6 +25,7 @@ C_SRCS := \
 	app/led_ctrl.c \
 	app/link_session.c \
 	app/cmd_dispatch.c \
+	app/siu_config.c \
 	common/protocol/cobs.c \
 	common/protocol/crc16.c \
 	common/protocol/frame.c \
@@ -92,9 +93,9 @@ $(BUILD)/host/test_protocol: tests/test_protocol.c $(PROTO_SRCS) $(HOST_DEPS)
 	@mkdir -p $(dir $@)
 	$(HOST_CC) $(HOST_CFLAGS) tests/test_protocol.c $(PROTO_SRCS) -o $@
 
-$(BUILD)/host/test_link_session: tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/led_ctrl.c $(PROTO_SRCS) $(HOST_DEPS)
+$(BUILD)/host/test_link_session: tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/siu_config.c app/led_ctrl.c $(PROTO_SRCS) $(HOST_DEPS)
 	@mkdir -p $(dir $@)
-	$(HOST_CC) $(HOST_CFLAGS) tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/led_ctrl.c $(PROTO_SRCS) -o $@
+	$(HOST_CC) $(HOST_CFLAGS) tests/test_link_session.c app/link_session.c app/cmd_dispatch.c app/siu_config.c app/led_ctrl.c $(PROTO_SRCS) -o $@
 
 test: $(TESTS:%=$(BUILD)/host/%)
 	@for t in $^; do echo "== $$t"; $$t || exit 1; done

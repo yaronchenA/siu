@@ -26,6 +26,7 @@ CP_SET, LED_SET, LED_RAW, LOCK_CMD, BUZZER = 0x40, 0x41, 0x42, 0x43, 0x44
 AUTH_FEEDBACK, RFID_CTRL, TELEMETRY_CFG, SELF_TEST, SIU_RESET = 0x45, 0x46, 0x47, 0x48, 0x49
 STATUS_FAST, TEMPERATURES, VOLTAGES, PP_DETAIL, FAULTS, AC_SENSE = 0x60, 0x61, 0x62, 0x63, 0x64, 0x65
 EVENT = 0x80
+CONFIG_GET, CONFIG_SET, CONFIG_VALUE, FACTORY_COMPLETE = 0xC0, 0xC1, 0xC2, 0xC3
 LOG_TEXT = 0xF0
 
 TLV_NAMES = {v: k for k, v in globals().items() if k.isupper() and isinstance(v, int) and 0 < v < 0xFF
@@ -170,6 +171,31 @@ def event_ack(last_evt_seq: int) -> tuple[int, bytes]:
     return EVENT_ACK, struct.pack("<H", last_evt_seq)
 
 
+def led_raw(r: int, g: int, b: int) -> tuple[int, bytes]:
+    return LED_RAW, bytes([r, g, b])
+
+
+AUTH_RESULTS = {"accepted": 0, "rejected": 1, "pending": 2, "expired": 3}
+
+
+def auth_feedback(req_id: int, result: int) -> tuple[int, bytes]:
+    return AUTH_FEEDBACK, bytes([req_id, result])
+
+
+CFG_LED_BRIGHTNESS = 0x01
+
+
+def config_set(req_id: int, key: int, value: bytes) -> tuple[int, bytes]:
+    return CONFIG_SET, bytes([req_id, key]) + value
+
+
+def config_get(key: int) -> tuple[int, bytes]:
+    return CONFIG_GET, bytes([key])
+
+
+RESULT_NAMES = {0: "OK", 1: "REJECTED", 2: "BUSY", 3: "FAILED", 4: "IN_PROGRESS"}
+
+
 @dataclass
 class StatusFast:
     cp_state: int
@@ -210,6 +236,17 @@ def describe_identity(f: Frame) -> str:
         ma, mi, pa, build, boot = struct.unpack_from("<BBBIB", v)
         lines.append(f"firmware {ma}.{mi}.{pa} build {build:08x}, bootloader {boot}")
     return "\n".join(lines)
+
+
+def describe_results(f: Frame) -> list[str]:
+    out = []
+    for v in f.find_all(RESULT):
+        req_id, ref, result, detail = v[:4]
+        out.append(f"RESULT req {req_id} {TLV_NAMES.get(ref, f'0x{ref:02X}')}: "
+                   f"{RESULT_NAMES.get(result, result)} (detail {detail})")
+    for v in f.find_all(CONFIG_VALUE):
+        out.append(f"CONFIG_VALUE key 0x{v[0]:02X} = {v[1:].hex()}")
+    return out
 
 
 def describe_errors(f: Frame) -> list[str]:
