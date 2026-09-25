@@ -108,10 +108,17 @@ siu/
 | User button | PA0 | On-board B1, active high — demo input |
 | Lock H-bridge IN1 / IN2 | PB4 / PB5 | Planned (DRV8871) |
 | Lock switch | PB12 | Planned, pull-up, closed = locked |
+| CP PWM / CP sense | PA8 (TIM1_CH1) / PA1 (ADC_IN1) | Planned |
+| PP sense / NTC | PA4 (ADC_IN4) / PB0 (ADC_IN8) | Planned |
+| 12 V, CP +12 V, CP −12 V rail monitors | PB1 / PC0 / PC1 (ADC_IN9–11) | Planned |
+| RC522 RFID | PA5 SCK, PA6 MISO, PA7 MOSI (SPI1), PB6 CS, PB7 RST | Planned |
+| Buzzer | PB8 (TIM16_CH1) | Planned |
+| E-stop tap / tamper | PC2 / PC3 | Planned |
+| AC sense L1, L2, L3, N–PE | PC10–PC13 (active low) | Planned |
 | RS485 / protocol UART | PA9 TX / PA10 RX, DE PA12 | USART1, 115200 8N1 — bench: USB-serial adapter (TXD→PA10, RXD←PA9, GND) |
 | SWD | PA13 / PA14 | Debug — don't reuse |
 
-Verify against the board user manual (UM1658) before wiring new functions.
+Full wiring with external components: `pine/design/bench_wiring.md`. Verify against the board user manual (UM1658) before wiring new functions.
 
 ## 9. Flash layout and firmware update
 
