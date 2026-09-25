@@ -17,4 +17,7 @@ void link_task_set_status(const siu_status_t *status);
  * section, so "now" can never be older than a frame time the link task just recorded. */
 void link_task_tick(void);
 
+/* Restarts the link timer (after a flash stall). Call from the main loop. */
+void link_task_touch(void);
+
 #endif /* LINK_TASK_H */

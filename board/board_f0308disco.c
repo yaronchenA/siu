@@ -12,6 +12,7 @@
  */
 #include "board.h"
 
+#include "fw_layout.h"
 #include "proto.h"
 #include "stm32f0xx.h"
 #include "stm32f0xx_ll_adc.h"
@@ -107,6 +108,34 @@ static void button_init(void)
     LL_AHB1_GRP1_EnableClock(LL_AHB1_GRP1_PERIPH_GPIOA);
     LL_GPIO_SetPinMode(GPIOA, LL_GPIO_PIN_0, LL_GPIO_MODE_INPUT);
     LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_0, LL_GPIO_PULL_NO);
+}
+
+void board_vectors_to_ram(void)
+{
+    const volatile uint32_t *src = (const volatile uint32_t *)FW_APP_BASE;
+    volatile uint32_t *dst = (volatile uint32_t *)FW_RAM_VECTORS;
+    for (unsigned i = 0; i < FW_VECTOR_TABLE_SIZE / 4u; i++) {
+        dst[i] = src[i];
+    }
+    LL_APB1_GRP2_EnableClock(LL_APB1_GRP2_PERIPH_SYSCFG);
+    SYSCFG->CFGR1 = (SYSCFG->CFGR1 & ~SYSCFG_CFGR1_MEM_MODE) | SYSCFG_CFGR1_MEM_MODE;   /* 0b11: SRAM at 0x0 */
+    __DSB();
+    __ISB();
+    __enable_irq();
+}
+
+void board_deinit(void)
+{
+    SysTick->CTRL = 0;
+    LL_APB1_GRP1_ForceReset(LL_APB1_GRP1_PERIPH_TIM3);
+    LL_APB1_GRP1_ReleaseReset(LL_APB1_GRP1_PERIPH_TIM3);
+    LL_RCC_SetSysClkSource(LL_RCC_SYS_CLKSOURCE_HSI);
+    while (LL_RCC_GetSysClkSource() != LL_RCC_SYS_CLKSOURCE_STATUS_HSI) {
+    }
+    LL_RCC_PLL_Disable();
+    while (LL_RCC_PLL_IsReady()) {
+    }
+    LL_FLASH_SetLatency(LL_FLASH_LATENCY_0);
 }
 
 void board_init(void)

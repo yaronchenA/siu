@@ -5,6 +5,7 @@
 
 #include "cmd_dispatch.h"
 #include "frame.h"
+#include "fw_update.h"
 #include "led_ctrl.h"
 #include "proto.h"
 #include "siu_config.h"
@@ -46,6 +47,7 @@ static void enter(link_state_t st)
     led_ctrl_set_override(LED_OVR_NOLINK, st != LINK_ACTIVE);
     if (st != LINK_ACTIVE) {
         cmd_dispatch_reset();
+        fw_update_abort();               /* the CPM restarts a transfer from FW_BEGIN */
     }
     if (st == LINK_UNLINKED) {
         s.session = PROTO_SESSION_NONE;
@@ -72,6 +74,13 @@ void link_session_tick(uint32_t now_ms)
         s.stats.link_losses++;
         siu_log("link: timeout, no valid request for %u ms", now_ms - s.last_rx_ms);
         enter(LINK_UNLINKED);
+    }
+}
+
+void link_session_touch(uint32_t now_ms)
+{
+    if (s.state != LINK_UNLINKED) {
+        s.last_rx_ms = now_ms;
     }
 }
 
@@ -280,6 +289,12 @@ size_t link_session_handle(const uint8_t *raw, size_t len, const siu_status_t *s
     if (end_session) {
         enter(LINK_UNLINKED);
         return 0;
+    }
+
+    /* Firmware update progress, in every response while an update is under way (§8.6). */
+    uint8_t fws[TLV_LEN_FW_STATUS];
+    if (fw_update_status(fws)) {
+        (void)tlv_put(&b, TLV_FW_STATUS, fws, sizeof fws);
     }
 
     /* Debug log lines ride along, but never push the response past PROTO_LOG_RESPONSE_MAX bytes

@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "fw_update.h"
 #include "led_ctrl.h"
 #include "proto.h"
 #include "siu_config.h"
@@ -54,9 +55,14 @@ static const req_record_t *find_request(uint8_t req_id, uint8_t type)
     return NULL;
 }
 
-/* Records the outcome of an executed action and reports it. */
+/* Records the outcome of an executed action and reports it. BUSY isn't recorded: the CPM
+ * retries with the same REQ_ID and the action must then really be attempted again. */
 static void finish_action(frame_builder_t *rsp, uint8_t req_id, uint8_t type, uint8_t result, uint8_t detail)
 {
+    if (result == PROTO_RESULT_BUSY) {
+        put_result(rsp, req_id, type, result, detail);
+        return;
+    }
     req_record_t *r = &s_history[s_history_next];
     s_history_next = (uint8_t)((s_history_next + 1u) % REQ_HISTORY);
     r->valid = true;
@@ -184,9 +190,14 @@ static uint8_t handle_action(uint8_t type, const uint8_t *val, uint8_t len, uint
     }
 
     uint8_t result = PROTO_RESULT_FAILED, detail = 0;
+    bool charging = s_cp.mode == CP_MODE_PWM;      /* no update while current is offered (§8.6) */
     switch (type) {
     case TLV_AUTH_FEEDBACK: do_auth_feedback(val, now_ms, &result, &detail); break;
     case TLV_CONFIG_SET:    do_config_set(val, len, &result, &detail); break;
+    case TLV_FW_BEGIN:      result = fw_update_begin(val, len, charging, &detail); break;
+    case TLV_FW_CHUNK:      result = fw_update_chunk(val, len, &detail); break;
+    case TLV_FW_END:        result = fw_update_end(&detail); break;
+    case TLV_FW_ACTIVATE:   result = fw_update_activate(charging, &detail); break;
     default: break;
     }
     finish_action(rsp, req_id, type, result, detail);
@@ -203,6 +214,10 @@ uint8_t cmd_dispatch_handle(uint8_t type, const uint8_t *val, uint8_t len,
     case TLV_CONFIG_GET:    return handle_config_get(val, len, rsp);
     case TLV_AUTH_FEEDBACK: return handle_action(type, val, len, TLV_LEN_AUTH_FEEDBACK, now_ms, rsp);
     case TLV_CONFIG_SET:    return handle_action(type, val, len, TLV_LEN_CONFIG_SET_MIN, now_ms, rsp);
+    case TLV_FW_BEGIN:      return handle_action(type, val, len, TLV_LEN_FW_BEGIN, now_ms, rsp);
+    case TLV_FW_CHUNK:      return handle_action(type, val, len, TLV_LEN_FW_CHUNK_MIN, now_ms, rsp);
+    case TLV_FW_END:        return handle_action(type, val, len, TLV_LEN_FW_END, now_ms, rsp);
+    case TLV_FW_ACTIVATE:   return handle_action(type, val, len, TLV_LEN_FW_ACTIVATE, now_ms, rsp);
     default:                return PROTO_ERR_UNKNOWN_TLV;   /* not implemented in this firmware yet */
     }
 }

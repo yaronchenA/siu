@@ -130,10 +130,19 @@ def test_resync_after_noise_with_delimiter(siu):
 
 
 def test_noise_without_delimiter_costs_one_frame(siu):
-    # Noise glued to the front of a frame corrupts that frame (COBS), the next one is fine.
-    siu.link.send_bytes(b"\x55\xAA\x12")
-    assert siu.request([]) is None
+    # Noise glued to the front of a frame (no 0x00 in between) corrupts that frame, the next is fine.
+    seq = siu.next_seq()
+    siu.link.send_bytes(b"\x55\xAA\x12" + p.encode_wire(p.Frame(0, seq, siu.session, [])))
+    siu.expect_silence()
     siu.poll()
+
+
+def test_leading_delimiter_flushes_noise(siu):
+    # The recommended sender behaviour (§2.2): a 0x00 before each frame makes noise harmless.
+    seq = siu.next_seq()
+    siu.link.send_bytes(b"\x55\xAA\x12" + b"\x00" + p.encode_wire(p.Frame(0, seq, siu.session, [])))
+    rsp = siu.link.recv(__import__("time").monotonic() + 0.05)
+    assert rsp is not None and rsp.seq == seq
 
 
 # ---- §5 duplicates -----------------------------------------------------------------------

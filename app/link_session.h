@@ -70,6 +70,10 @@ size_t link_session_handle(const uint8_t *raw, size_t len, const siu_status_t *s
 /* Call regularly: detects the link timeout. */
 void link_session_tick(uint32_t now_ms);
 
+/* Restarts the link timer, e.g. after a flash erase stalled the CPU and the UART lost bytes —
+ * time the SIU itself couldn't listen must not count as silence from the CPM. */
+void link_session_touch(uint32_t now_ms);
+
 link_state_t link_session_state(void);
 uint8_t link_session_id(void);
 const link_stats_t *link_session_stats(void);

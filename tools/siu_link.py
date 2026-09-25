@@ -35,13 +35,15 @@ class Link:
     def send(self, frame: p.Frame) -> None:
         if self.trace:
             print(p.format_frame("TX ->", frame))
-        self.ser.write(p.encode_wire(frame))
+        # Leading 0x00: flushes any partial frame out of the SIU's receiver, so a byte left over
+        # from an overrun (e.g. while it erased flash) never costs us the next frame (§2.2).
+        self.ser.write(b"\x00" + p.encode_wire(frame))
 
     def send_raw(self, raw: bytes) -> None:
         """A raw (un-encoded) frame — lets tests send broken CRCs, bad versions, etc."""
         if self.trace:
             print(f"TX -> raw {raw.hex(' ').upper()}")
-        self.ser.write(p.cobs_encode(raw) + b"\x00")
+        self.ser.write(b"\x00" + p.cobs_encode(raw) + b"\x00")
 
     def send_bytes(self, data: bytes) -> None:
         """Bytes straight onto the wire, no framing — for noise and resync tests."""

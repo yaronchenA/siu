@@ -17,6 +17,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the design, module list, and pin map.
 | LED commands: `LED_SET`, `LED_RAW` (service), `AUTH_FEEDBACK` flashes, brightness (`CONFIG_SET/GET` key 0x01) | Done, host-tested + bench-verified |
 | Action duplicate filter (`REQ_ID` history, `RESULT`) | Done |
 | Debug log over the link (`LOG_TEXT`, `CONFIG_SET` key 0x10) | Done — printed by the emulator and the HIL tests |
+| Bootloader + firmware update over the link (`FW_BEGIN/CHUNK/END/ACTIVATE`) | Done — ~3 s for an 11 KB image, power-loss-safe install |
 | `CP_SET` | Validated and stored — no CP hardware yet |
 | Lock control | Next |
 | Events, RFID, CP/PP, telemetry, config storage | Planned |
@@ -68,15 +69,27 @@ It performs the HELLO → SESSION_START handshake, prints the SIU's identity, th
 
 After reset the LED runs its self-test (red → green → blue), then blinks red slowly (no link) until the emulator connects.
 
+## Firmware update over the link
+
+```sh
+make                                              # builds build/siu.img
+.venv/bin/python tools/fw_update.py build/siu.img [--log]
+```
+
+Transfers the image the way the CPM will (erase ~0.6 s, transfer ~1.4 s, install + reboot ~1 s) and reconnects to show the new identity (reset reason `fw-update`). If the image equals the installed one the bootloader skips the copy (reset reason `software`). Details: ARCHITECTURE.md §9, protocol spec §8.6.
+
+`make flash` programs bootloader + app over SWD and erases the staging slot.
+
 ## Hardware-in-the-loop tests
 
-`make hil` runs an automated pytest suite against the real SIU over the USB-serial adapter — 62 tests:
+`make hil` runs an automated pytest suite against the real SIU over the USB-serial adapter — 77 tests (~30 s):
 
 - protocol rules: handshake and identity, session rules, every receive rule (bad CRC, wrong version, malformed TLV, oversize, wrong session, wrong direction), resync after line noise, duplicate SEQ and REQ_ID handling, link timeout and session end, error codes, `CP_SET` duty limits, LED commands, config, and 250 polls at 20 ms with no loss;
 - exact TLV layouts: every response TLV has the length and field layout in the spec, and every received frame re-encodes to exactly the bytes on the wire;
-- the SIU's debug log: it reports commands, errors, duplicates, dropped frames and link timeouts, in whole lines, within the response size budget.
+- the SIU's debug log: it reports commands, errors, duplicates, dropped frames and link timeouts, in whole lines, within the response size budget;
+- firmware update: real installs through the bootloader, "same image → no reinstall", back to the original, and every rejection (wrong CRC, other hardware, out-of-order chunks, early FW_END, while charging, bad sizes, link loss mid-transfer).
 
-When a test fails, pytest shows the SIU's log lines for that test. `--trace-frames` prints every frame. Takes ~13 s.
+When a test fails, pytest shows the SIU's log lines for that test. `--trace-frames` prints every frame. The update tests need `build/siu.img` to match the flashed firmware (`make flash` first).
 
 ```sh
 make hil                               # default port /dev/cu.usbserial-0001

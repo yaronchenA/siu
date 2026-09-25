@@ -27,6 +27,7 @@ AUTH_FEEDBACK, RFID_CTRL, TELEMETRY_CFG, SELF_TEST, SIU_RESET = 0x45, 0x46, 0x47
 STATUS_FAST, TEMPERATURES, VOLTAGES, PP_DETAIL, FAULTS, AC_SENSE = 0x60, 0x61, 0x62, 0x63, 0x64, 0x65
 EVENT = 0x80
 CONFIG_GET, CONFIG_SET, CONFIG_VALUE, FACTORY_COMPLETE = 0xC0, 0xC1, 0xC2, 0xC3
+FW_BEGIN, FW_CHUNK, FW_END, FW_ACTIVATE, FW_STATUS = 0xA0, 0xA1, 0xA2, 0xA3, 0xA8
 LOG_TEXT = 0xF0
 
 TLV_NAMES = {v: k for k, v in globals().items() if k.isupper() and isinstance(v, int) and 0 < v < 0xFF
@@ -194,6 +195,58 @@ def config_get(key: int) -> tuple[int, bytes]:
 
 
 RESULT_NAMES = {0: "OK", 1: "REJECTED", 2: "BUSY", 3: "FAILED", 4: "IN_PROGRESS"}
+RESULT_OK, RESULT_REJECTED, RESULT_BUSY, RESULT_FAILED, RESULT_IN_PROGRESS = 0, 1, 2, 3, 4
+
+# ---- firmware update (§8.6) ------------------------------------------------------------------
+
+FW_CHUNK_MAX = 200
+FWU_STATES = {0: "idle", 1: "erasing", 2: "receiving", 3: "verifying", 4: "verified", 5: "error"}
+FWU_IDLE, FWU_ERASING, FWU_RECEIVING, FWU_VERIFYING, FWU_VERIFIED, FWU_ERROR = range(6)
+FWU_ERRORS = {0: "none", 1: "erase failed", 2: "write failed", 3: "CRC mismatch", 4: "bad image header",
+              5: "wrong hardware model"}
+FWU_REJECT = {1: "wrong offset / incomplete", 2: "wrong state", 3: "bad chunk", 6: "bad size",
+              7: "not while charging"}
+
+
+def fw_begin(req_id: int, size: int, crc: int, version: tuple[int, int, int]) -> tuple[int, bytes]:
+    return FW_BEGIN, struct.pack("<BII3B", req_id, size, crc, *version)
+
+
+def fw_chunk(req_id: int, offset: int, data: bytes) -> tuple[int, bytes]:
+    return FW_CHUNK, struct.pack("<BI", req_id, offset) + data
+
+
+def fw_end(req_id: int) -> tuple[int, bytes]:
+    return FW_END, bytes([req_id])
+
+
+def fw_activate(req_id: int) -> tuple[int, bytes]:
+    return FW_ACTIVATE, bytes([req_id])
+
+
+@dataclass
+class FwStatus:
+    state: int
+    next_offset: int
+    error: int
+
+    @classmethod
+    def parse(cls, v: bytes) -> "FwStatus":
+        return cls(*struct.unpack_from("<BIB", v))
+
+    def __str__(self) -> str:
+        err = f", error: {FWU_ERRORS.get(self.error, self.error)}" if self.error else ""
+        return f"{FWU_STATES.get(self.state, self.state)}, next offset {self.next_offset}{err}"
+
+
+# Firmware image header at 0xC0 (common/fw_image.h)
+IMG_HEADER_OFFSET = 0xC0
+IMG_HEADER = struct.Struct("<IHHIBBBBI12s")
+
+
+def image_header(img: bytes) -> dict:
+    magic, ver, hw, size, ma, mi, pa, _, build, _ = IMG_HEADER.unpack_from(img, IMG_HEADER_OFFSET)
+    return {"magic": magic, "hw_model": hw, "image_size": size, "version": (ma, mi, pa), "build_id": build}
 
 
 @dataclass
@@ -322,6 +375,16 @@ def describe_tlv(t: int, v: bytes) -> str:
             return str(StatusFast.parse(v))
         if t == LOG_TEXT:
             return " | ".join(v.decode(errors="replace").splitlines())
+        if t == FW_BEGIN:
+            req, size, crc, ma, mi, pa = struct.unpack_from("<BII3B", v)
+            return f"req {req}, {size} bytes, CRC-32 0x{crc:08X}, v{ma}.{mi}.{pa}"
+        if t == FW_CHUNK:
+            req, off = struct.unpack_from("<BI", v)
+            return f"req {req}, offset {off}, {len(v) - 5} bytes"
+        if t in (FW_END, FW_ACTIVATE):
+            return f"req {v[0]}"
+        if t == FW_STATUS:
+            return str(FwStatus.parse(v))
     except (IndexError, struct.error):
         return "(too short to decode)"
     return ""

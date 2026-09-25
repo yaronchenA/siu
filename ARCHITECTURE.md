@@ -63,6 +63,9 @@ Rules:
 | `app/events` | 8-entry event queue with ACK | Planned |
 | `app/cp_ctrl` + `drivers/cp_pwm_adc` | CP PWM/modes, A–F detection, diode check | Needs the ±12 V front-end |
 | `app/safety_mon` | Over-temp / link loss → CP state F; unlock gates | Planned |
+| `app/fw_update` + `src/fw_port.c` + `drivers/flash` | Firmware update receiver (FW_BEGIN/CHUNK/END/ACTIVATE), flash erase/program | **Done** (host + HIL tested, real installs) |
+| `boot/boot_main.c` | Bootloader: validate slots, install activated image, recover from an interrupted install, start app | **Done** |
+| `common/crc32`, `common/fw_image` | CRC-32 (zlib) and image header/trailer validation, shared by app, bootloader and tools | **Done** |
 | `drivers/rc522`, `ntc`, `ac_sense`, `buzzer`, `cfg_flash` | Peripherals | Planned |
 
 ## 5. Safety and robustness
@@ -70,7 +73,7 @@ Rules:
 - **Independent watchdog (IWDG)**, fed from the main loop only when every module has checked in — a stuck module resets the chip.
 - **No dynamic memory.** RAM budget target: protocol ≈ 1 KB, stacks ≈ 1 KB, RFID ≈ 0.5 KB, rest ≈ 1 KB → ≈ 3.5 of 8 KB.
 - **Configuration in flash** in two alternating pages, so a power loss during a write can't corrupt it.
-- **Bootloader (later):** the Cortex-M0 has no VTOR, so an application behind a bootloader must copy its vector table to the start of SRAM and remap SRAM to address 0 (`SYSCFG_CFGR1.MEM_MODE`). Costs 192 bytes of RAM; the linker script will reserve it when the bootloader is added.
+- **Bootloader + firmware update** (§9): the Cortex-M0 has no VTOR, so the app copies its vector table to the start of SRAM and remaps SRAM to address 0 (`SYSCFG_CFGR1.MEM_MODE`) as the very first thing in `main()`.
 
 ## 6. Testing
 - `make test` — builds and runs the host unit tests (`tests/`) with the Mac's C compiler.
@@ -85,7 +88,8 @@ siu/
 ├── ARCHITECTURE.md     this file
 ├── README.md           build, flash, test
 ├── Makefile
-├── ld/                 linker script
+├── boot/               bootloader
+├── ld/                 linker scripts (app.ld, boot.ld)
 ├── board/              board.h + one board_*.c per board
 ├── drivers/            hardware drivers (use board + ST LL)
 ├── app/                pure logic, host-testable
@@ -108,3 +112,18 @@ siu/
 | SWD | PA13 / PA14 | Debug — don't reuse |
 
 Verify against the board user manual (UM1658) before wiring new functions.
+
+## 9. Flash layout and firmware update
+
+| Region | Address | Size | Contents |
+|---|---|---|---|
+| Bootloader | `0x08000000` | 8 KB | `boot/` — ~2.4 KB used |
+| App slot | `0x08002000` | 26 KB | the running firmware — ~11 KB used |
+| Staging slot | `0x08008800` | 26 KB | an update downloads here; kept afterwards as the backup copy |
+| Reserved | `0x0800F000` | 4 KB | configuration storage (later) |
+
+RAM: `0x20000000`–`0xBF` app vector table (copied at start-up), `0x200000C0` boot-info word (bootloader tells the app "I just installed you"), normal use from `0x20000100`.
+
+An **image** (`build/siu.img`) = app binary + 32-byte header at `0xC0` (magic, hardware model, size, version, build ID) + CRC-32 trailer — made by `tools/mkimage.py`. The bootloader starts the app only if header, hardware model and CRC are valid; it installs the staged image if it was activated and differs from the app, or if the app is invalid and staging is valid (interrupted install). With no valid image at all it blinks red fast (recovery needs SWD).
+
+Flash erase/program stalls the CPU (and so the UART) — the app does it only in the main loop, only after the last response has left the UART, and restarts the link timer afterwards. `make flash` erases the staging slot so an old staged image can't replace a freshly flashed app.

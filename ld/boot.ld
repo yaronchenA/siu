@@ -1,22 +1,22 @@
 /*
- * STM32F030R8: 64 KB flash, 8 KB SRAM.
- * Works with ST's startup_stm32f030x8.s (third_party/st/cmsis_device_f0).
+ * SIU bootloader: 0x08000000, 8 KB.
+ * Flash/RAM layout: common/fw_layout.h. Works with ST's startup_stm32f030x8.s.
  *
- * No heap: the firmware uses static allocation only (ARCHITECTURE.md §5).
- * Bootloader (later): the application will move up in flash and reserve the first
- * 192 bytes of SRAM for its relocated vector table (Cortex-M0 has no VTOR).
+ * RAM starts at 0x20000100: the first 192 bytes hold the app's vector table (copied there at
+ * start-up, Cortex-M0 has no VTOR) and 0x200000C0 is the bootloader -> app "boot info" word.
+ * No heap: static allocation only (ARCHITECTURE.md §5).
  */
 
 ENTRY(Reset_Handler)
 
-_estack = ORIGIN(RAM) + LENGTH(RAM);
+_estack = 0x20002000;
 _Min_Heap_Size  = 0x000;
 _Min_Stack_Size = 0x400;   /* 1 KB main stack — checked at link time below */
 
 MEMORY
 {
-    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 64K
-    RAM   (xrw) : ORIGIN = 0x20000000, LENGTH = 8K
+    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 8K
+    RAM   (xrw) : ORIGIN = 0x20000100, LENGTH = 8K - 0x100
 }
 
 SECTIONS
@@ -25,6 +25,13 @@ SECTIONS
     {
         . = ALIGN(4);
         KEEP(*(.isr_vector))
+    } > FLASH
+    ASSERT(SIZEOF(.isr_vector) == 0xC0, "vector table must be 0xC0 bytes (FW_VECTOR_TABLE_SIZE)")
+
+    /* bootloader ID + version at offset 0xC0 (FW_BOOT_ID_ADDR) */
+    .boot_id ORIGIN(FLASH) + 0xC0 :
+    {
+        KEEP(*(.boot_id))
         . = ALIGN(4);
     } > FLASH
 

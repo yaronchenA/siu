@@ -106,3 +106,8 @@ void rs485_set_frame_end_hook(void (*hook)(void))
 {
     s_frame_end_hook = hook;
 }
+
+bool rs485_tx_idle(void)
+{
+    return s_tx_head == s_tx_tail && LL_USART_IsActiveFlag_TC(USART1);
+}

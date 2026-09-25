@@ -27,6 +27,9 @@ size_t rs485_read(uint8_t *buf, size_t max);
 /* Diagnostics: bytes lost because the RX buffer was full, or the hardware overran. */
 uint32_t rs485_rx_dropped(void);
 
+/* True when everything queued has left the UART (last stop bit sent). */
+bool rs485_tx_idle(void);
+
 /* Called from the RX interrupt whenever a 0x00 byte (end of a COBS frame) arrives. */
 void rs485_set_frame_end_hook(void (*hook)(void));
 

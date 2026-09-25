@@ -12,7 +12,7 @@ static size_t       s_acc_len;
 static bool         s_acc_overflow;
 static uint8_t      s_raw[PROTO_MAX_RAW];
 static uint8_t      s_rsp_raw[PROTO_MAX_RAW];
-static uint8_t      s_rsp_wire[PROTO_MAX_WIRE];
+static uint8_t      s_rsp_wire[PROTO_MAX_WIRE + 1u];   /* + leading 0x00 */
 static siu_status_t s_status;                  /* written by the main loop under a critical section */
 
 void link_task_init(const siu_identity_t *id, uint32_t now_ms)
@@ -36,6 +36,13 @@ void link_task_tick(void)
     board_critical_exit(cs);
 }
 
+void link_task_touch(void)
+{
+    uint32_t cs = board_critical_enter();
+    link_session_touch(board_millis());
+    board_critical_exit(cs);
+}
+
 static void handle_frame(const uint8_t *wire, size_t len)
 {
     size_t raw_len;
@@ -47,10 +54,12 @@ static void handle_frame(const uint8_t *wire, size_t len)
     if (n == 0u) {
         return;
     }
-    size_t w = cobs_encode(s_rsp_raw, n, s_rsp_wire, sizeof s_rsp_wire - 1u);
+    /* A leading 0x00 flushes any partial frame out of the CPM's receiver first (§2.2). */
+    s_rsp_wire[0] = 0x00u;
+    size_t w = cobs_encode(s_rsp_raw, n, &s_rsp_wire[1], sizeof s_rsp_wire - 2u);
     if (w > 0u) {
-        s_rsp_wire[w++] = 0x00u;
-        (void)rs485_write(s_rsp_wire, w);
+        s_rsp_wire[1u + w] = 0x00u;
+        (void)rs485_write(s_rsp_wire, w + 2u);
     }
 }
 

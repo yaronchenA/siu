@@ -114,6 +114,11 @@ enum {
  * 115200 baud — inside the CPM's 10 ms response timeout (§6.1). */
 #define PROTO_LOG_RESPONSE_MAX  90u
 #define TLV_LEN_STATUS_FAST     13u
+#define TLV_LEN_FW_BEGIN        12u      /* req_id, size u32, crc32 u32, version 3 x u8 */
+#define TLV_LEN_FW_CHUNK_MIN     7u      /* req_id, offset u32, >= 2 data bytes */
+#define TLV_LEN_FW_END           1u
+#define TLV_LEN_FW_ACTIVATE      1u
+#define TLV_LEN_FW_STATUS        6u      /* state, next_offset u32, error */
 
 /* ERROR.code (§8.10) */
 enum {

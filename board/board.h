@@ -23,6 +23,15 @@
  * Set once per LED part number so white/amber/purple look right (siu_detailed_design.md §6.1.5). */
 extern const uint16_t board_led_balance[3];
 
+/* Application start-up, before anything else: copies the app's vector table to the start of RAM and
+ * maps RAM at address 0 (Cortex-M0 has no VTOR), then enables interrupts (the bootloader jumps here
+ * with interrupts disabled). */
+void board_vectors_to_ram(void);
+
+/* Bootloader only: undoes board_init() (clock back to HSI, timers reset, SysTick off) before
+ * jumping to the application, which then sets everything up again from reset state. */
+void board_deinit(void);
+
 /* Puts outputs in their safe state, then sets up clocks (48 MHz), the 1 ms tick, and GPIO/timers. */
 void board_init(void);
 
