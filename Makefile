@@ -2,6 +2,7 @@
 #
 #   make          build bootloader + application + update image
 #   make flash    program bootloader + application over the ST-LINK/V2 (and clear the staging slot)
+#   make flash-factory   production-style: bootloader + image in the staging slot, installed at first boot
 #   make test     build and run the host unit tests
 #   make hil      hardware-in-the-loop tests against a connected SIU (PORT=...)
 #   make clean
@@ -74,7 +75,7 @@ LDFLAGS  := $(CPUFLAGS) --specs=nano.specs -Wl,--gc-sections -Wl,--print-memory-
 APP_OBJS  := $(APP_SRCS:%.c=$(BUILD)/app/%.o) $(ASM_SRCS:%.s=$(BUILD)/app/%.o)
 BOOT_OBJS := $(BOOT_SRCS:%.c=$(BUILD)/boot/%.o) $(ASM_SRCS:%.s=$(BUILD)/boot/%.o)
 
-.PHONY: all clean flash test hil
+.PHONY: all clean flash flash-factory test hil
 
 all: $(BUILD)/siu_boot.bin $(BUILD)/siu.img
 	@$(SIZE) $(BUILD)/siu_boot.elf $(BUILD)/siu_app.elf
@@ -124,6 +125,19 @@ flash: $(BUILD)/siu_boot.bin $(BUILD)/siu.img
 		-c "flash erase_address 0x08008800 26624" \
 		-c "verify_image $(BUILD)/siu_boot.bin 0x08000000" \
 		-c "verify_image $(BUILD)/siu.img 0x08002000" \
+		-c "reset run" -c "shutdown"
+
+# Production-style programming ("first-boot install", manufacturing_procedures.md §5): bootloader +
+# release image into the STAGING slot, app slot left erased. On first power-up the bootloader installs
+# the image (~1 s, cyan LED) — testing the install path on every unit and leaving a backup copy.
+flash-factory: $(BUILD)/siu_boot.bin $(BUILD)/siu.img
+	openocd -f board/st_nucleo_f0.cfg -c "hla_vid_pid $(STLINK_VID_PID)" \
+		-c "init" -c "reset halt" \
+		-c "flash erase_address 0x08002000 53248" \
+		-c "flash write_image erase $(BUILD)/siu_boot.bin 0x08000000" \
+		-c "flash write_image $(BUILD)/siu.img 0x08008800" \
+		-c "verify_image $(BUILD)/siu_boot.bin 0x08000000" \
+		-c "verify_image $(BUILD)/siu.img 0x08008800" \
 		-c "reset run" -c "shutdown"
 
 # ---- host unit tests -----------------------------------------------------------------------

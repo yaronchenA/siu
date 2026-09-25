@@ -78,7 +78,8 @@ make                                              # builds build/siu.img
 
 Transfers the image the way the CPM will (erase ~0.6 s, transfer ~1.4 s, install + reboot ~1 s) and reconnects to show the new identity (reset reason `fw-update`). If the image equals the installed one the bootloader skips the copy (reset reason `software`). Details: ARCHITECTURE.md §9, protocol spec §8.6.
 
-`make flash` programs bootloader + app over SWD and erases the staging slot.
+`make flash` programs bootloader + app over SWD and erases the staging slot (development).
+`make flash-factory` programs the way production does (manufacturing_procedures.md §5): bootloader + image into the **staging** slot, app slot erased — the bootloader installs it at first power-up (~1 s, cyan LED), so the install path is exercised and a backup copy is in place from day one.
 
 ## Hardware-in-the-loop tests
 
